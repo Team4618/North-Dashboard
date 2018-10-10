@@ -216,6 +216,7 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
             }
 
             if(highlight) {
+               //TODO: fix this, pretty sure its broken
                rect2 bounds = graph->bounds;
                f32 min_value = (curr_graph->unit_id == 0) ? curr_graph->min_value : data->units[curr_graph->unit_id].min_value;
                f32 max_value = (curr_graph->unit_id == 0) ? curr_graph->max_value : data->units[curr_graph->unit_id].max_value;
@@ -271,12 +272,13 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
    }
 }
 
-//NOTE: the suffix string must exist for the entire lifetime of the graph
+//NOTE: the "suffix" string must exist for the entire lifetime of the graph
 void SetUnit(MultiLineGraphData *data, u32 unit_id, string suffix) {
    Assert(unit_id < ArraySize(data->units));
    data->units[unit_id].suffix = suffix;
 }
 
+//NOTE: the "name" string must exist for the entire lifetime of the graph
 void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 unit_id) {
    u32 i = Hash(name) % ArraySize(data->line_hash);
    LineGraph *graph = NULL;

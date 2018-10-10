@@ -13,6 +13,7 @@
 #include "lib/ui_core.cpp"
 #include "lib/ui_button.cpp"
 #include "lib/ui_textbox.cpp"
+#include "lib/ui_checkbox.cpp"
 #include "lib/ui_vertical_list.cpp"
 #include "lib/ui_horizontal_slider.cpp"
 #include "lib/ui_multiline_graph.cpp"
@@ -26,8 +27,8 @@ buffer ReadEntireFile(const char* path, bool in_exe_directory = false) {
    char full_path[MAX_PATH + 1];
    sprintf(full_path, "%.*s%s", exe_directory.length, exe_directory.text, path);
 
-   HANDLE file_handle = CreateFileA(in_exe_directory ? full_path : path, GENERIC_READ, 0, NULL, OPEN_EXISTING,
-                                    FILE_ATTRIBUTE_NORMAL, NULL);
+   HANDLE file_handle = CreateFileA(in_exe_directory ? full_path : path, GENERIC_READ, FILE_SHARE_READ,
+                                    NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
                                     
    buffer result = {};
    if(file_handle != INVALID_HANDLE_VALUE) {
@@ -36,6 +37,10 @@ buffer ReadEntireFile(const char* path, bool in_exe_directory = false) {
       result.data = (u8 *) VirtualAlloc(0, result.size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
       ReadFile(file_handle, result.data, result.size, &number_of_bytes_read, NULL);
       CloseHandle(file_handle);
+   } else {
+      OutputDebugStringA("File read error\n");
+      DWORD error_code = GetLastError(); 
+      u32 i = 0;
    }
 
    return result;
@@ -719,7 +724,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    
    glCreateBuffers(3, gl.buffers);
    
-   __temp_arena = VirtualAllocArena(Megabyte(4));
+   __temp_arena = VirtualAllocArena(Megabyte(10));
 
    UIContext ui_context = {};
    ui_context.frame_arena = VirtualAllocArena(Megabyte(2));
@@ -764,21 +769,114 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       
       AutonomousRun_RobotStateSample states[20] = {};
       for(u32 i = 0; i < 20; i++) {
-         states[i] = {V2(1, 0), V2(1, 0), 0, i};
+         states[i] = {V2(1 + i, 0.5 * i), V2(1, 0), 0, i};
       }
       WriteArray(&test_auto_run, states, ArraySize(states));
 
-      AutonomousRun_SubsystemDiagnostics subsystem_a = {11, 0};
+      AutonomousRun_SubsystemDiagnostics subsystem_a = {11, 2};
       char subsystem_a_name[] = "subsystem_a";
       WriteStruct(&test_auto_run, &subsystem_a);
       WriteArray(&test_auto_run, subsystem_a_name, 11);
 
-      AutonomousRun_SubsystemDiagnostics subsystem_b = {11, 0};
+      //------------
+      AutonomousRun_Diagnostic diag_1 = {5, 1, 10};
+      char diag_1_name[] = "diag1";
+      AutonomousRun_DiagnosticSample diag_1_samples[10] = {};
+      for(u32 i = 0; i < 10; i++) {
+         diag_1_samples[i] = {i, 2 * i};
+      }
+
+      AutonomousRun_Diagnostic diag_2 = {5, 1, 10};
+      char diag_2_name[] = "diag2";
+      AutonomousRun_DiagnosticSample diag_2_samples[10] = {};
+      for(u32 i = 0; i < 10; i++) {
+         diag_2_samples[i] = {i, i};
+      }
+      //------------
+
+      WriteStruct(&test_auto_run, &diag_1);
+      WriteArray(&test_auto_run, diag_1_name, 5);
+      WriteArray(&test_auto_run, diag_1_samples, 10);
+
+      WriteStruct(&test_auto_run, &diag_2);
+      WriteArray(&test_auto_run, diag_2_name, 5);
+      WriteArray(&test_auto_run, diag_2_samples, 10);
+
+      AutonomousRun_SubsystemDiagnostics subsystem_b = {11, 2};
       char subsystem_b_name[] = "subsystem_b";
       WriteStruct(&test_auto_run, &subsystem_b);
       WriteArray(&test_auto_run, subsystem_b_name, 11);
 
+      WriteStruct(&test_auto_run, &diag_1);
+      WriteArray(&test_auto_run, diag_1_name, 5);
+      WriteArray(&test_auto_run, diag_1_samples, 10);
+
+      WriteStruct(&test_auto_run, &diag_2);
+      WriteArray(&test_auto_run, diag_2_name, 5);
+      WriteArray(&test_auto_run, diag_2_samples, 10);
+
       WriteEntireFile("test_auto_run.ncar", test_auto_run);
+   }
+
+   {
+      buffer test_auto_proj = PushTempBuffer(Megabyte(1));
+
+      FileHeader numbers = header(AUTONOMOUS_PROGRAM_MAGIC_NUMBER, AUTONOMOUS_PROGRAM_CURR_VERSION);
+      AutonomousProgram_FileHeader header = {};
+      header.variable_count = 3;
+      WriteStruct(&test_auto_proj, &numbers);
+      WriteStruct(&test_auto_proj, &header);
+
+      AutonomousProgram_Variable vmax = {3, 10};
+      char vmax_name[] = "vel";
+      WriteStruct(&test_auto_proj, &vmax);
+      WriteArray(&test_auto_proj, vmax_name, 3);
+
+      AutonomousProgram_Variable accel = {5, 10};
+      char accel_name[] = "accel";
+      WriteStruct(&test_auto_proj, &accel);
+      WriteArray(&test_auto_proj, accel_name, 5);
+
+      AutonomousProgram_Variable deccel = {6, 10};
+      char deccel_name[] = "deccel";
+      WriteStruct(&test_auto_proj, &deccel);
+      WriteArray(&test_auto_proj, deccel_name, 6);
+
+      AutonomousProgram_Node start = {};
+      start.pos = V2(-10, -10);
+      start.command_count = 0;
+      start.path_count = 1;
+      WriteStruct(&test_auto_proj, &start);
+
+      AutonomousProgram_Path path1 = {};
+      WriteStruct(&test_auto_proj, &path1);
+
+      AutonomousProgram_Value accel_var = { 1 };
+      u8 accel_var_len = 5;
+      char accel_var_name[] = "accel";
+      WriteStruct(&test_auto_proj, &accel_var);
+      WriteStruct(&test_auto_proj, &accel_var_len);
+      WriteArray(&test_auto_proj, accel_var_name, 5);
+
+      AutonomousProgram_Value deccel_var = { 1 };
+      u8 deccel_var_len = 6;
+      char deccel_var_name[] = "deccel";
+      WriteStruct(&test_auto_proj, &deccel_var);
+      WriteStruct(&test_auto_proj, &deccel_var_len);
+      WriteArray(&test_auto_proj, deccel_var_name, 6);
+
+      AutonomousProgram_Value max_vel_var = { 1 };
+      u8 max_vel_var_len = 3;
+      char max_vel_var_name[] = "vel";
+      WriteStruct(&test_auto_proj, &max_vel_var);
+      WriteStruct(&test_auto_proj, &max_vel_var_len);
+      WriteArray(&test_auto_proj, max_vel_var_name, 3);
+
+      AutonomousProgram_Node end = {};
+      end.pos = V2(10, 2);
+      WriteStruct(&test_auto_proj, &end);
+
+      WriteEntireFile("test_auto_proj.ncap", test_auto_proj);
    }
 
    LARGE_INTEGER frequency;
@@ -884,6 +982,9 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
          TranslateMessage(&msg);
          DispatchMessageA(&msg);
       }
+
+      //TODO: directory change notifications
+      state.directory_changed = false;
 
       bool has_packets = true;
       while(has_packets) {

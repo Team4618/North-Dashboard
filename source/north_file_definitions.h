@@ -31,6 +31,12 @@ struct Settings_FileHeader {
 //-----------------------------------------------------------
 
 //-----------------------------------------------------------
+namespace Field_Flags {
+   enum type {
+      MIRRORED = (1 << 0), //eg. steamworks
+      SYMMETRIC = (1 << 1), //eg. powerup
+   };
+};
 
 struct Field_StartingPosition {
    v2 pos;
@@ -151,9 +157,88 @@ struct AutonomousRun_FileHeader {
 //-----------------------------------------------------------
 
 //-----------------------------------------------------------
+struct AutonomousProgram_DataPoint {
+   f32 distance;
+   f32 value;
+};
+
+struct AutonomousProgram_ContinuousEvent {
+   u8 subsystem_name_length;
+   u8 command_name_length;
+   u8 datapoint_count;
+   //char [subsystem_name_length]
+   //char [command_name_length]
+   //AutonomousProgram_DataPoint [datapoint_count]
+};
+
+struct AutonomousProgram_DiscreteEvent {
+   f32 distance;
+   u8 subsystem_name_length;
+   u8 command_name_length;
+   u8 parameter_count;
+   //char [subsystem_name_length]
+   //char [command_name_length]
+   //f32 [parameter_count]
+};
+
+struct AutonomousProgram_Value {
+   u8 is_variable;
+   //f32 if !is_variable
+   //struct { u8 length; char [length] } if is_variable
+};
+
+//TODO: linked auto projects
+struct AutonomousProgram_Path {
+   u8 is_reverse;
+
+   //NOTE: begin & end points are parent.pos & end_node.pos
+   u8 conditional_length; //NOTE: if conditional_length is 0, there is no conditional
+   u8 control_point_count;
+
+   u8 continuous_event_count;
+   u8 discrete_event_count;
+
+   //AutonomousProgram_Value accel
+   //AutonomousProgram_Value deccel
+   //AutonomousProgram_Value max_vel
+
+   //char conditional_name [conditional_length]
+   //v2 [control_point_count]
+   //AutonomousProgram_ContinuousEvent [continuous_event_count]
+   //AutonomousProgram_DiscreteEvent [discrete_event_count]
+
+   //AutonomousProgram_Node end_node
+};
+
+struct AutonomousProgram_Command {
+   u8 subsystem_name_length;
+   u8 command_name_length;
+   u8 parameter_count;
+   //char [subsystem_name_length]
+   //char [command_name_length]
+   //f32 [parameter_count]
+};
+
+struct AutonomousProgram_Node {
+   v2 pos;
+   u8 command_count;
+   u8 path_count;
+   //AutonomousProgram_Command [command_count]
+   //AutonomousProgram_Path [path_count]
+};
+
+struct AutonomousProgram_Variable {
+   u8 name_length;
+   f32 value;
+   //char [name_length]
+};
+
 struct AutonomousProgram_FileHeader {
 #define AUTONOMOUS_PROGRAM_MAGIC_NUMBER RIFF_CODE("NCAP") 
 #define AUTONOMOUS_PROGRAM_CURR_VERSION 0
+   u8 variable_count;
+   //AutonomousProgram_Variable [variable_count]
+   //AutonomousProgram_Node begining_node
 };
 //-----------------------------------------------------------
 

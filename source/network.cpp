@@ -1,16 +1,5 @@
 #include "north_network_definitions.h"
 
-void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
-   SetUnit(data, (u32) Diagnostic::Feet, Literal("ft"));
-   SetUnit(data, (u32) Diagnostic::FeetPerSecond, Literal("ft/s"));
-   SetUnit(data, (u32) Diagnostic::Degrees, Literal("deg"));
-   SetUnit(data, (u32) Diagnostic::DegreesPerSecond, Literal("deg/s"));
-   SetUnit(data, (u32) Diagnostic::Seconds, Literal("s"));
-   SetUnit(data, (u32) Diagnostic::Percent, Literal("%"));
-   SetUnit(data, (u32) Diagnostic::Amp, Literal("amp"));
-   SetUnit(data, (u32) Diagnostic::Volt, Literal("volt"));
-}
-
 void ResetDashboardState(DashboardState *state) {
    Reset(&state->state_arena);
 

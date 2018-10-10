@@ -27,9 +27,11 @@ void ReadSettingsFile(DashboardState *state) {
       {
          Field_FileHeader *header = ConsumeStruct(&field_file, Field_FileHeader);
          state->field.size = V2(header->width, header->height);
+         state->field.flags = header->flags;
 
-         u32 starting_positions_size = sizeof(v2) * header->starting_position_count;
-         v2 *starting_positions = (v2 *) ConsumeSize(&field_file, starting_positions_size);
+         u32 starting_positions_size = sizeof(Field_StartingPosition) * header->starting_position_count;
+         Field_StartingPosition *starting_positions = ConsumeArray(&field_file, Field_StartingPosition,
+                                                                   header->starting_position_count);
          
          //TODO: make some sort of error message instead?
          Assert(header->starting_position_count <= ArraySize(state->field.starting_positions));
@@ -52,7 +54,7 @@ void WriteFieldFile(DashboardState *state) {
       buffer old_field_file = ReadEntireFile(Concat(state->field_name, Literal(".ncff")));
       ConsumeStruct(&old_field_file, FileHeader);
       Field_FileHeader *header = ConsumeStruct(&old_field_file, Field_FileHeader);
-      ConsumeArray(&old_field_file, v2, header->starting_position_count);
+      ConsumeArray(&old_field_file, Field_StartingPosition, header->starting_position_count);
       img.width = header->image_width;
       img.height = header->image_height;
       img.texels = (u32 *) ConsumeSize(&old_field_file, img.width * img.height * 4);
@@ -62,11 +64,12 @@ void WriteFieldFile(DashboardState *state) {
    Field_FileHeader header = {};
    header.width = state->field.size.x;
    header.height = state->field.size.y;
+   header.flags = state->field.flags;
    header.starting_position_count = state->field.starting_position_count;
    header.image_width = img.width;
    header.image_height = img.height;
 
-   u32 starting_positions_size = header.starting_position_count * sizeof(v2);
+   u32 starting_positions_size = header.starting_position_count * sizeof(Field_StartingPosition);
    u32 image_size = img.width * img.height * 4;
    buffer field_file = PushTempBuffer(sizeof(numbers) + sizeof(header) +
                                       starting_positions_size + image_size);
@@ -113,4 +116,142 @@ void WriteSettingsFile(DashboardState *state) {
 
    WriteEntireFile("settings.ncsf", settings_file);
    OutputDebugStringA("settings saved\n");
+}
+
+void ReadAutonomousRun(DashboardState *state, string file_name) {
+   Reset(&state->auto_run_arena);
+   buffer auto_run_file = ReadEntireFile(Concat(file_name, Literal(".ncar")));
+   state->auto_run.loaded = (auto_run_file.data != NULL);
+   if(auto_run_file.data != NULL) {
+      FileHeader *file_numbers = ConsumeStruct(&auto_run_file, FileHeader);
+
+      if((file_numbers->magic_number == AUTONOMOUS_RUN_MAGIC_NUMBER) && 
+         (file_numbers->version_number == AUTONOMOUS_RUN_CURR_VERSION))
+      {
+         AutonomousRun_FileHeader *header = ConsumeStruct(&auto_run_file, AutonomousRun_FileHeader);
+         
+         string robot_name = ConsumeString(&auto_run_file, header->robot_name_length);
+
+         AutonomousRun_RobotStateSample *robot_samples =
+            ConsumeArray(&auto_run_file, AutonomousRun_RobotStateSample, header->robot_state_sample_count);
+         
+         if(header->robot_state_sample_count > 0) {
+            state->auto_run.robot_sample_count = header->robot_state_sample_count;
+            state->auto_run.robot_samples = (AutonomousRun_RobotStateSample *) PushCopy(&state->auto_run_arena, robot_samples,
+                                             header->robot_state_sample_count * sizeof(AutonomousRun_RobotStateSample));
+         
+            state->auto_run.min_time = F32_MAX;
+            state->auto_run.max_time = -F32_MAX;
+            
+            for(u32 i = 0; i < header->robot_state_sample_count; i++) {
+               AutonomousRun_RobotStateSample *sample = robot_samples + i;
+               state->auto_run.min_time = Min(state->auto_run.min_time, sample->time);
+               state->auto_run.max_time = Max(state->auto_run.max_time, sample->time);
+            }
+
+            state->auto_run.curr_time = state->auto_run.min_time;
+         }
+
+         AutoRunSubsystem *subsystems = PushArray(&state->auto_run_arena, AutoRunSubsystem, header->subsystem_count);
+         state->auto_run.subsystem_count = header->subsystem_count;
+         state->auto_run.subsystems = subsystems;
+
+         for(u32 i = 0; i < header->subsystem_count; i++) {
+            AutoRunSubsystem *subsystem_graph = subsystems + i;
+            AutonomousRun_SubsystemDiagnostics *subsystem = 
+               ConsumeStruct(&auto_run_file, AutonomousRun_SubsystemDiagnostics);
+
+            subsystem_graph->name = PushCopy(&state->auto_run_arena, 
+                                             ConsumeString(&auto_run_file, subsystem->name_length));
+            
+            u32 graph_arena_size = Megabyte(2);
+            MemoryArena graph_arena = NewMemoryArena(PushSize(&state->auto_run_arena, graph_arena_size), graph_arena_size); 
+
+            subsystem_graph->graph = NewMultiLineGraph(graph_arena);
+            SetDiagnosticsGraphUnits(&subsystem_graph->graph);
+
+            for(u32 j = 0; j < subsystem->diagnostic_count; j++) {
+               AutonomousRun_Diagnostic *line = ConsumeStruct(&auto_run_file, AutonomousRun_Diagnostic);
+               string line_name = PushCopy(&state->auto_run_arena, ConsumeString(&auto_run_file, line->name_length));
+
+               for(u32 k = 0; k < line->sample_count; k++) {
+                  AutonomousRun_DiagnosticSample *sample = ConsumeStruct(&auto_run_file, AutonomousRun_DiagnosticSample);
+                  AddEntry(&subsystem_graph->graph, line_name, sample->value, sample->time, line->unit);
+               }
+            }
+         }
+      }
+
+      FreeEntireFile(&auto_run_file);
+   }
+}
+
+void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path);
+AutoNode *ParseAutoNode(buffer *file, MemoryArena *arena) {
+   AutoNode *result = PushStruct(arena, AutoNode);
+   AutonomousProgram_Node *file_node = ConsumeStruct(file, AutonomousProgram_Node);
+   
+   result->pos = file_node->pos;
+   result->path_count = file_node->path_count;
+   result->out_paths = PushArray(arena, AutoPath, file_node->path_count);
+
+   for(u32 i = 0; i < file_node->command_count; i++) {
+      AutonomousProgram_Command *command = ConsumeStruct(file, AutonomousProgram_Command);
+      ConsumeString(file, command->subsystem_name_length);
+      ConsumeString(file, command->command_name_length);
+      ConsumeArray(file, f32, command->parameter_count);
+   }
+
+   for(u32 i = 0; i < file_node->path_count; i++) {
+      AutoPath *path = result->out_paths + i;
+      ParseAutoPath(file, arena, path);
+      path->in_node = result;
+   }
+
+   return result;
+}
+
+f32 ParseAutoValue(buffer *file, MemoryArena *arena) {
+   AutonomousProgram_Value *file_value = ConsumeStruct(file, AutonomousProgram_Value);
+   f32 value = 0;
+   if(file_value->is_variable) {
+      u8 *variable_length = ConsumeStruct(file, u8);
+      string variable_name = ConsumeString(file, *variable_length);
+   } else {
+      value = *ConsumeStruct(file, f32);
+   }
+   return value;
+}
+
+void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path) {
+   AutonomousProgram_Path *file_path = ConsumeStruct(file, AutonomousProgram_Path);
+
+   f32 accel = ParseAutoValue(file, arena);
+   f32 deccel = ParseAutoValue(file, arena);
+   f32 max_vel = ParseAutoValue(file, arena);
+
+   string conditional = ConsumeString(file, file_path->conditional_length);
+   v2 *control_points = ConsumeArray(file, v2, file_path->control_point_count);
+   //TODO: events
+
+   path->out_node = ParseAutoNode(file, arena);
+}
+
+AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
+   buffer file = ReadEntireFile(Concat(file_name, Literal(".ncap")));
+   if(file.data != NULL) {
+      FileHeader *file_numbers = ConsumeStruct(&file, FileHeader);
+      AutonomousProgram_FileHeader *header = ConsumeStruct(&file, AutonomousProgram_FileHeader);
+
+      for(u32 i = 0; i < header->variable_count; i++) {
+         AutonomousProgram_Variable *var = ConsumeStruct(&file, AutonomousProgram_Variable);
+         ConsumeArray(&file, char, var->name_length);
+      }
+
+      AutoProjectLink *result = PushStruct(arena, AutoProjectLink);
+      result->starting_node = ParseAutoNode(&file, arena);
+      return result;
+   }
+
+   return NULL;
 }

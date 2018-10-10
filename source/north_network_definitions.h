@@ -17,12 +17,6 @@ namespace PacketType {
    };
 };
 
-struct RobotState {
-   v2 pos;
-   v2 vel;
-   f32 angle;
-};
-
 //------------------------------------------
 namespace Welcome_CommandType {
    enum type {
@@ -143,7 +137,9 @@ enum GameMode {
 struct State_PacketHeader {
    u8 packet_type; 
    
-   RobotState robot;
+   v2 pos;
+   v2 vel;
+   f32 angle;
    
    u8 mode;
    u8 subsystem_count;
@@ -166,25 +162,91 @@ struct SetParameter_PacketHeader {
 
 struct SetState_PacketHeader {
    u8 packet_type;
-   RobotState state;
+   v2 pos;
+   f32 angle;
 };
 
 //--------------------------------------
-struct PathSegment {
+struct CurrentAutoPath_Path {
    v2 begin;
    v2 end;
-   u8 conditional; //NOTE: 0 for false, else true
+   u8 is_conditional; //NOTE: 0 for false, else true
    u8 control_point_count;
    //v2 [control_point_count]
 };
 
 struct CurrentAutoPath_PacketHeader {
    u8 packet_type;
-   u8 path_segment_count;
-   //PathSegment [path_segment_count]
+   u8 path_count;
+   //Path [path_count]
 };
 //-------------------------------------
 
-//TODO: UploadAutonomous_PacketHeader
+struct UploadAutonomous_DataPoint {
+   f32 distance;
+   f32 value;
+};
+
+struct UploadAutonomous_ContinuousEvent {
+   u8 subsystem_name_length;
+   u8 command_name_length;
+   u8 datapoint_count;
+   //char [subsystem_name_length]
+   //char [command_name_length]
+   //UploadAutonomous_DataPoint [datapoint_count]
+};
+
+struct UploadAutonomous_DiscreteEvent {
+   f32 distance;
+   u8 subsystem_name_length;
+   u8 command_name_length;
+   u8 parameter_count;
+   //char [subsystem_name_length]
+   //char [command_name_length]
+   //f32 [parameter_count]
+};
+
+struct UploadAutonomous_Path {
+   u8 is_reverse;
+   f32 accel;
+   f32 deccel;
+   f32 max_vel;
+
+   //NOTE: begin & end points are parent.pos & end_node.pos
+   u8 conditional_length; //NOTE: if conditional_length is 0, there is no conditional
+   u8 control_point_count;
+
+   u8 continuous_event_count;
+   u8 discrete_event_count;
+
+   //char conditional_name [conditional_length]
+   //v2 [control_point_count]
+   //UploadAutonomous_ContinuousEvent [continuous_event_count]
+   //UploadAutonomous_DiscreteEvent [discrete_event_count]
+
+   //UploadAutonomous_Node end_node
+};
+
+struct UploadAutonomous_Command {
+   u8 subsystem_name_length;
+   u8 command_name_length;
+   u8 parameter_count;
+   //char [subsystem_name_length]
+   //char [command_name_length]
+   //f32 [parameter_count]
+};
+
+struct UploadAutonomous_Node {
+   v2 pos;
+   u8 command_count;
+   u8 path_count;
+   //UploadAutonomous_Command [command_count]
+   //UploadAutonomous_Path [path_count]
+};
+
+struct UploadAutonomous_PacketHeader {
+   
+   //UploadAutonomous_Node begining_node
+};
 
 #pragma pack(pop)

@@ -19,15 +19,6 @@ string ToString(GameMode mode) {
    return EMPTY_STRING;
 }
 
-/*
-struct SubsystemCommand {
-   string name;
-
-   string *param_names;
-   u32 param_count;
-};
-*/
-
 struct Subsystem {
    string name;
    //SubsystemCommand *commands;
@@ -46,22 +37,44 @@ enum DashboardPage {
 
 #include "north_file_definitions.h"
 
+struct AutoRunSubsystem {
+   string name;
+   MultiLineGraphData graph;
+};
+
+struct AutoPath;
+struct AutoNode {
+   v2 pos;
+   u32 path_count;
+   AutoPath *out_paths;
+};
+
+struct AutoPath {
+   AutoNode *in_node;
+   AutoNode *out_node;
+
+   u32 control_point_count;
+   v2 *control_points;
+};
+
+struct AutoProjectLink {
+   AutoNode *starting_node;
+
+   AutoProjectLink *next;
+};
+
 struct DashboardState {
-   MemoryArena state_arena;
-   
    DashboardPage page;
    Subsystem *selected_subsystem;
-   //selected_auto_run
    //selected_robot_profile
    
    GameMode prev_mode;
    GameMode mode;
 
-   bool recording_auto_diagnostics;
-
    //TODO: we can either be connected or load robot data from a file
    bool connected;
 
+   MemoryArena state_arena; //TODO: change to robot_arena
    struct {
       bool loaded;
       string name;
@@ -77,6 +90,7 @@ struct DashboardState {
    struct {
       bool loaded;
       v2 size;
+      u32 flags;
       u32 starting_position_count;
       Field_StartingPosition starting_positions[16];
       texture image;
@@ -94,11 +108,33 @@ struct DashboardState {
       TextBoxData image_file_box;
    } new_field;
    
+   MemoryArena auto_run_arena;
    struct {
       bool loaded;
+      string robot_name;
+      f32 min_time;
+      f32 max_time;
+      f32 curr_time;
 
+      u32 robot_sample_count;
+      AutonomousRun_RobotStateSample *robot_samples;
+
+      u32 subsystem_count;
+      AutoRunSubsystem *subsystems;
    } auto_run;
 
+   struct {
+      bool starting_pos_selected;
+      v2 starting_pos;
+   } home_field;
+
+   MemoryArena auto_programs_arena;
+   AutoProjectLink *first_auto_project;
+
+   //MemoryArena recording_diagnostics_arena;
+   bool recording_auto_diagnostics;
+
+   bool directory_changed;
    MemoryArena file_lists_arena;
    FileListLink *ncff_files;
    FileListLink *ncar_files;
@@ -108,14 +144,46 @@ struct DashboardState {
    f32 last_send_time;
 };
 
+void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
+   SetUnit(data, 1 /*Feet*/, Literal("ft"));
+   SetUnit(data, 2 /*FeetPerSecond*/, Literal("ft/s"));
+   SetUnit(data, 3 /*Degrees*/, Literal("deg"));
+   SetUnit(data, 4 /*DegreesPerSecond*/, Literal("deg/s"));
+   SetUnit(data, 5 /*Seconds*/, Literal("s"));
+   SetUnit(data, 6 /*Percent*/, Literal("%"));
+   SetUnit(data, 7 /*Amp*/, Literal("amp"));
+   SetUnit(data, 8 /*Volt*/, Literal("volt"));
+}
+
 #include "theme.cpp"
 #include "file_io.cpp"
+
+void reloadFiles(DashboardState *state) {
+   Reset(&state->file_lists_arena);
+   state->ncff_files = ListFilesWithExtension("*.ncff", &state->file_lists_arena);
+   state->ncar_files = ListFilesWithExtension("*.ncar", &state->file_lists_arena);
+   
+   Reset(&state->auto_programs_arena);
+   state->first_auto_project = NULL;
+
+   for(FileListLink *file = ListFilesWithExtension("*.ncap"); file; file = file->next) {
+      AutoProjectLink *auto_proj = ReadAutoProject(file->name, &state->auto_programs_arena);
+      if(auto_proj) {
+         auto_proj->next = state->first_auto_project;
+         state->first_auto_project = auto_proj;
+      }
+   }
+
+   ReadSettingsFile(state);
+}
 
 void initDashboard(DashboardState *state) {
    state->state_arena = VirtualAllocArena(Megabyte(24));
    state->settings_arena = VirtualAllocArena(Megabyte(1));
+   state->auto_run_arena = VirtualAllocArena(Megabyte(20));
+   state->auto_programs_arena = VirtualAllocArena(Megabyte(20));
    state->file_lists_arena = VirtualAllocArena(Megabyte(10));
-   state->page = DashboardPage_AutoRuns;
+   state->page = DashboardPage_Home;
 
    state->new_field.name_box.text = state->new_field.name_buffer;
    state->new_field.name_box.size = ArraySize(state->new_field.name_buffer);
@@ -124,11 +192,7 @@ void initDashboard(DashboardState *state) {
    state->new_field.image_file_box.size = ArraySize(state->new_field.image_file_buffer);
 
    //TODO: do everytime we get a directory change notification
-   Reset(&state->file_lists_arena);
-   state->ncff_files = ListFilesWithExtension("*.ncff", &state->file_lists_arena);
-   state->ncar_files = ListFilesWithExtension("*.ncar", &state->file_lists_arena);
-
-   ReadSettingsFile(state);
+   reloadFiles(state);
 }
 
 //TODO: move into a ui_utils file?
@@ -156,6 +220,15 @@ ui_textbox _SettingsRow(ui_id id, element *page, char *label, TextBoxData *text,
    if(IsSelected(result.e))
       Outline(result.e, GREEN);
    Label(row, suffix, 20);
+   return result;
+}
+
+ui_checkbox _SettingsRow(ui_id id, element *page, char *label, u32 *value, u32 flag, 
+                         v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0))
+{
+   element *row = Panel(page, RowLayout, V2(Size(page->bounds).x, 20), V2(0, 0), V2(0, 5));
+   Label(row, label, 20);
+   ui_checkbox result = _CheckBox(id, row, value, flag, size, padding, margin);
    return result;
 }
 
@@ -193,6 +266,11 @@ ui_slide_animation *_SlideAnimation(ui_id id, UIContext *context, f32 min, f32 m
    return result;
 }
 
+void DrawAutoProj(ui_field_topdown *field, AutoProjectLink *auto_proj) {
+   v2 p = GetPoint(field, auto_proj->starting_node->pos);
+   Rectangle(field->e, RectCenterSize(p, V2(5, 5)), RED);
+}
+
 void DrawHome(element *page, DashboardState *state) {
    StackLayout(page);
 
@@ -201,6 +279,7 @@ void DrawHome(element *page, DashboardState *state) {
       ui_field_topdown field = FieldTopdown(base, state->field.image, state->field.size,
                                             Size(page->bounds).x);
 
+      /*
       v2 points[] = { V2(-10, -10), V2(0, 0), V2(10, 0), V2(10, 10) };
       DrawBezierCurve(&field, points, ArraySize(points));
       
@@ -208,6 +287,7 @@ void DrawHome(element *page, DashboardState *state) {
          v2 p = GetPoint(&field, points[i]);
          Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
       }
+      */
 
       v2 robot_size_px = state->robot.loaded ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
       for(u32 i = 0; i < state->field.starting_position_count; i++) {
@@ -223,7 +303,8 @@ void DrawHome(element *page, DashboardState *state) {
                                   BLACK);           
 
          if(starting_pos_click.clicked) {
-
+            state->home_field.starting_pos_selected = true;
+            state->home_field.starting_pos = starting_pos->pos;
          }   
       }
 
@@ -232,24 +313,31 @@ void DrawHome(element *page, DashboardState *state) {
          DrawPath(field_topdown, path);
       }
       */
-   }
 
-   ui_slide_animation *auto_selector_anim = SlideAnimation(page->context, 50, 300, 3);
-   v2 selector_pos = V2(page->bounds.max.x - auto_selector_anim->value, page->bounds.min.y + 5);
-   element *auto_selector = VerticalList(page, RectMinSize(selector_pos, V2(300, Size(page->bounds).y - 10)));
-   auto_selector_anim->open = ContainsCursor(auto_selector);
-   Background(auto_selector, V4(0.5, 0.5, 0.5, 0.5));
+      if(state->home_field.starting_pos_selected) {
+         ui_slide_animation *auto_selector_anim = SlideAnimation(page->context, 50, 300, 3);
+         v2 selector_pos = V2(page->bounds.max.x - auto_selector_anim->value, page->bounds.min.y + 5);
+         element *auto_selector = VerticalList(page, RectMinSize(selector_pos, V2(300, Size(page->bounds).y - 10)));
+         auto_selector_anim->open = ContainsCursor(auto_selector);
+         Background(auto_selector, V4(0.5, 0.5, 0.5, 0.5));
 
-   Label(auto_selector, "Autos", 20);
-   /*
-   for(auto file) {
-      if(IsHot()) {
-         if(state->field.loaded) {
-            DrawPaths(auto);
+         Label(auto_selector, "Autos", 20);
+         for(AutoProjectLink *auto_proj = state->first_auto_project; auto_proj; auto_proj = auto_proj->next) {
+            UI_SCOPE(auto_selector->context, auto_proj);
+
+            ui_button btn = Button(auto_selector, menu_button, "AUTOTEST");
+
+            if(btn.clicked) {
+
+            }
+
+            if(IsHot(btn.e)) {
+               DrawAutoProj(&field, auto_proj);
+            }
          }
       }
+
    }
-   */
 }
 
 void DrawSubsystem(element *page, Subsystem *subsystem) {
@@ -257,44 +345,44 @@ void DrawSubsystem(element *page, Subsystem *subsystem) {
    MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
 }
 
-f32 slider_test = 0;
 void DrawAutoRuns(element *full_page, DashboardState *state) {
    StackLayout(full_page);
-   element *page = Panel(full_page, ColumnLayout,
-                         RectMinMax(full_page->bounds.min + V2(50, 0), 
-                                    full_page->bounds.max - V2(50, 0)));
+   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min + V2(50, 0), 
+                                                      full_page->bounds.max - V2(50, 0)));
    Outline(page, BLACK);
-   /*
-   if(state->selected_auto_run == NULL)
-      state->selected_auto_run = state->latest_auto_run;
-   */
 
-   if(state->field.loaded) {
-      ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, 
-                                            Size(page->bounds).x);
+   if(state->auto_run.loaded) {
+      if(state->field.loaded) {
+         ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, 
+                                             Size(page->bounds).x);
 
-      //TODO: draw robot samples
-      /*
-      for(s32 i = 0; i < ArraySize(points); i++) {
-         v2 p = GetPoint(&field, points[i]);
-         Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
+         for(s32 i = 0; i < state->auto_run.robot_sample_count; i++) {
+            AutonomousRun_RobotStateSample *sample = state->auto_run.robot_samples + i;
+            v2 p = GetPoint(&field, sample->pos);
+            Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
+         }
+      } else {
+         Label(page, "No field loaded", 20);
       }
-      */
+
+      //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
+      HorizontalSlider(page, &state->auto_run.curr_time, state->auto_run.min_time, state->auto_run.max_time,
+                       V2(Size(page->bounds).x - 40, 40), V2(20, 20));
+      
+      //TODO: highlight robot at current slider time
+      //TODO: draw vertical bar in multiline graph at t=curr_time
+
+      for(u32 i = 0; i < state->auto_run.subsystem_count; i++) {
+         AutoRunSubsystem *subsystem = state->auto_run.subsystems + i;
+         UI_SCOPE(page->context, subsystem);
+         Label(page, subsystem->name, 20);
+         MultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
+      }
+
    } else {
-      Label(page, "No field loaded", 20);
+      Label(page, "No run selected", 20);
    }
-
-   //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
-   HorizontalSlider(page, &slider_test, -10, 10, V2(Size(page->bounds).x - 40, 40), V2(20, 20));
    
-   //TODO: draw robot at current slider time
-
-   //draw graphs
-   /*
-   for()
-      MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
-   */
-
    ui_slide_animation *run_selector_anim = SlideAnimation(page->context, 50, 300, 3);
    v2 selector_pos = V2(full_page->bounds.max.x - run_selector_anim->value, full_page->bounds.min.y + 5);
    element *run_selector = VerticalList(full_page, RectMinSize(selector_pos, V2(300, Size(full_page->bounds).y - 10)));
@@ -303,7 +391,7 @@ void DrawAutoRuns(element *full_page, DashboardState *state) {
 
    for(FileListLink *file = state->ncar_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
-         
+         ReadAutonomousRun(state, file->name);
       }
    }
 }
@@ -335,14 +423,17 @@ void DrawSettings(element *full_page, DashboardState *state) {
       field_data_changed |= SettingsRow(page, "Field Width: ", &state->field.size.x, "ft").valid_enter;
       field_data_changed |= SettingsRow(page, "Field Height: ", &state->field.size.y, "ft").valid_enter;
       
+      field_data_changed |= SettingsRow(page, "Field Mirrored (eg. Steamworks)", &state->field.flags, Field_Flags::MIRRORED, V2(20, 20)).clicked;
+      field_data_changed |= SettingsRow(page, "Field Symmetric (eg. Power Up)", &state->field.flags, Field_Flags::SYMMETRIC, V2(20, 20)).clicked;
+
       ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, Size(page->bounds).x);
 
       v2 robot_size_px = state->robot.loaded ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
       for(u32 i = 0; i < state->field.starting_position_count; i++) {
          Field_StartingPosition *starting_pos = state->field.starting_positions + i;
+         UI_SCOPE(page->context, starting_pos);
 
-         //TODO: we had to type POINTER_UI_ID(starting_pos) a lot here, need a better way to do things
-         element *field_starting_pos = _Panel(POINTER_UI_ID(starting_pos), field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
+         element *field_starting_pos = Panel(field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
          v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
                                  -sinf(starting_pos->angle * (PI32 / 180)));
          Background(field_starting_pos, RED);
@@ -354,21 +445,22 @@ void DrawSettings(element *full_page, DashboardState *state) {
          starting_pos->pos = ClampTo(starting_pos->pos + PixelsToFeet(&field, drag_pos.drag), 
                                      RectCenterSize(V2(0, 0), field.size_in_ft));
          
-         element *starting_pos_panel = _Panel(POINTER_UI_ID(starting_pos), page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
+         element *starting_pos_panel = Panel(page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
          Background(starting_pos_panel, BLUE); 
 
          Label(starting_pos_panel, "X: ", 20);
-         field_data_changed |= _TextBox(POINTER_UI_ID(starting_pos), starting_pos_panel, &starting_pos->pos.x, 20).valid_changed;
+         field_data_changed |= TextBox(starting_pos_panel, &starting_pos->pos.x, 20).valid_changed;
          Label(starting_pos_panel, "Y: ", 20);
-         field_data_changed |= _TextBox(POINTER_UI_ID(starting_pos), starting_pos_panel, &starting_pos->pos.y, 20).valid_changed;
+         field_data_changed |= TextBox(starting_pos_panel, &starting_pos->pos.y, 20).valid_changed;
          Label(starting_pos_panel, "Angle: ", 20);
-         field_data_changed |= _TextBox(POINTER_UI_ID(starting_pos), starting_pos_panel, &starting_pos->angle, 20).valid_changed;
+         field_data_changed |= TextBox(starting_pos_panel, &starting_pos->angle, 20).valid_changed;
 
-         if(_Button(POINTER_UI_ID(starting_pos), starting_pos_panel, menu_button, "Delete").clicked) {
+         if(Button(starting_pos_panel, menu_button, "Delete").clicked) {
             for(u32 j = i; j < (state->field.starting_position_count - 1); j++) {
                state->field.starting_positions[j] = state->field.starting_positions[j + 1];
             }
             state->field.starting_position_count--;
+            field_data_changed = true;
          }
 
          if(IsHot(field_starting_pos) || ContainsCursor(starting_pos_panel)) {
@@ -384,6 +476,8 @@ void DrawSettings(element *full_page, DashboardState *state) {
          Background(add_starting_pos, RED);
          if(DefaultClickInteraction(add_starting_pos).clicked) {
             state->field.starting_position_count++;
+            state->field.starting_positions[state->field.starting_position_count - 1] = {};
+            field_data_changed = true;
          }
       }
 

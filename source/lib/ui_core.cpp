@@ -170,9 +170,30 @@ struct UIContext {
    f64 curr_time;
    f32 fps;
 
+   ui_id scope_id;
+
    //below will probably get rewritten   
    InputState input_state;
 };
+
+//----------------------------------------------------
+//TODO: test this, remove most uses of POINTER_UI_ID
+#define UI_SCOPE(context, ptr) _ui_scope _UI_SCOPE_##__LINE__ ((context), POINTER_UI_ID(ptr)); 
+struct _ui_scope {
+   UIContext *context;
+   ui_id prev_scope_id;
+
+   _ui_scope(UIContext *context_in, ui_id scope_id) {
+      context = context_in;
+      prev_scope_id = context->scope_id;
+      context->scope_id = scope_id;
+   }
+
+   ~_ui_scope() {
+      context->scope_id = prev_scope_id;
+   }
+};
+//----------------------------------------------------
 
 interaction Interaction(ui_id id, UIContext *context) {
    interaction result = { id, context->curr_time, context->input_state.pos, context->input_state.pos };
@@ -208,7 +229,7 @@ element *addElement(element *parent, ui_id id) {
    
    result->context = context;
    result->parent = parent;
-   result->id = id;
+   result->id = id + context->scope_id;
    
    if(parent->first_child == NULL) {
       parent->first_child = result;
@@ -690,9 +711,10 @@ void HoverTooltip(element *e, char *tooltip, f32 time = 0.5) {
 //---------------------------------------------------------------------
 
 #define GetOrAllocate(e, type) (type *) _GetOrAllocate(e->id, e->context, sizeof(type))
-u8 *_GetOrAllocate(ui_id id, UIContext *context, u32 size) {
+u8 *_GetOrAllocate(ui_id in_id, UIContext *context, u32 size) {
    u8 *result = NULL;
 
+   ui_id id = in_id + context->scope_id;
    u32 hash = (3 * id.a + 4 * id.b) % ArraySize(context->persistent_hash); //TODO: better hash function :)
    for(persistent_hash_link *link = context->persistent_hash[hash]; link; link = link->next) {
       if(link->id == id) {
