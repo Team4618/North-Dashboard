@@ -1,4 +1,4 @@
-#include "north_network_definitions.h"
+#include "north/north_network_definitions.h"
 
 void ResetDashboardState(DashboardState *state) {
    Reset(&state->state_arena);

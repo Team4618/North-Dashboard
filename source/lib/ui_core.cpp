@@ -707,7 +707,6 @@ void HoverTooltip(element *e, string tooltip, f32 time = 0.5) {
 void HoverTooltip(element *e, char *tooltip, f32 time = 0.5) {
    HoverTooltip(e, Literal(tooltip), time);
 }
-
 //---------------------------------------------------------------------
 
 #define GetOrAllocate(e, type) (type *) _GetOrAllocate(e->id, e->context, sizeof(type))
@@ -736,3 +735,39 @@ u8 *_GetOrAllocate(ui_id in_id, UIContext *context, u32 size) {
    
    return result;
 }
+
+//Basic animations-------------------------------------------------
+struct ui_slide_animation {
+   bool init;
+   bool open;
+   f32 min;
+   f32 max;
+   f32 value;
+};
+
+#define SlideAnimation(...) _SlideAnimation(GEN_UI_ID, __VA_ARGS__)
+ui_slide_animation *_SlideAnimation(ui_id id, UIContext *context, f32 min, f32 max, f32 time) {
+   ui_slide_animation *result = (ui_slide_animation *) _GetOrAllocate(id, context, sizeof(ui_slide_animation));
+   
+   if(!result->init) {
+      result->init = true;
+      result->min = min;
+      result->value = min;
+      result->max = max;
+   } else {
+      //TODO: this
+      if(min != result->min){
+
+      }
+
+      if(max != result->max) {
+
+      }
+   }
+   
+   //TODO: time stuff, proper animations
+   result->value = Clamp(min, max, result->value + (result->open ? 5 : -5));
+
+   return result;
+}
+//---------------------------------------------------------------------

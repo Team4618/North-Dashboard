@@ -520,16 +520,100 @@ mat4 Orthographic(f32 top, f32 bottom, f32 left, f32 right, f32 nearPlane, f32 f
    return result;
 }
 
+string exe_directory = {};
+
+//------------------PLATFORM-SPECIFIC-STUFF---------------------
 #if defined(_WIN32)
+   //NOTE: on windows you need to include "windows.h" before common
    u32 AtomicIncrement(volatile u32 *x) {
       Assert(( (u64)x & 0x3 ) == 0);
       return InterlockedIncrement(x);
    }
    #define READ_BARRIER MemoryBarrier()
    #define WRITE_BARRIER MemoryBarrier()
+
+   MemoryArena PlatformAllocArena(u64 size) {
+      return NewMemoryArena(VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE), size);
+   }
+
+   buffer ReadEntireFile(const char* path, bool in_exe_directory = false) {
+      char full_path[MAX_PATH + 1];
+      sprintf(full_path, "%.*s%s", exe_directory.length, exe_directory.text, path);
+
+      HANDLE file_handle = CreateFileA(in_exe_directory ? full_path : path, GENERIC_READ, FILE_SHARE_READ,
+                                       NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                                       
+      buffer result = {};
+      if(file_handle != INVALID_HANDLE_VALUE) {
+         DWORD number_of_bytes_read;
+         result.size = GetFileSize(file_handle, NULL);
+         result.data = (u8 *) VirtualAlloc(0, result.size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+         ReadFile(file_handle, result.data, result.size, &number_of_bytes_read, NULL);
+         CloseHandle(file_handle);
+      } else {
+         OutputDebugStringA("File read error\n");
+         DWORD error_code = GetLastError(); 
+         u32 i = 0;
+      }
+
+      return result;
+   }
+
+   buffer ReadEntireFile(string path, bool in_exe_directory = false) {
+      return ReadEntireFile(ToCString(path), in_exe_directory);
+   }
+
+   void FreeEntireFile(buffer *file) {
+      VirtualFree(file->data, 0, MEM_RELEASE);
+      file->data = 0;
+      file->size = 0;
+   }
+
+   void WriteEntireFile(const char* path, buffer file) {
+      HANDLE file_handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                                       FILE_ATTRIBUTE_NORMAL, NULL);
+                                       
+      if(file_handle != INVALID_HANDLE_VALUE) {
+         DWORD number_of_bytes_written;
+         WriteFile(file_handle, file.data, file.offset, &number_of_bytes_written, NULL);
+         CloseHandle(file_handle);
+      }
+   }
+
+   void WriteEntireFile(string path, buffer file) {
+      return WriteEntireFile(ToCString(path), file);
+   }
+
+   struct FileListLink {
+      FileListLink *next;
+      string name;
+   };
+
+   FileListLink *ListFilesWithExtension(char *wildcard_extension, MemoryArena *arena = &__temp_arena) {
+      WIN32_FIND_DATAA file = {};
+      HANDLE handle = FindFirstFileA(wildcard_extension, &file);
+      FileListLink *result = NULL;
+      if(handle != INVALID_HANDLE_VALUE) {
+         do {
+            FileListLink *new_link = PushStruct(arena, FileListLink);
+            string name = Literal(file.cFileName);
+            for(u32 i = 0; i < name.length; i++) {
+               if(name.text[i] == '.') {
+                  name.length = i;
+                  break;
+               }
+            }
+            new_link->name = PushCopy(arena, name);
+            new_link->next = result;
+            result = new_link;
+         } while(FindNextFileA(handle, &file));
+      }
+      return result;
+   }
 #else
    #error "we dont support that platform yet"
 #endif
+//------------------------------------------------------------------
 
 struct ticket_mutex {
    volatile u32 ticket;

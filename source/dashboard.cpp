@@ -35,7 +35,7 @@ enum DashboardPage {
    DashboardPage_Settings
 };
 
-#include "north_file_definitions.h"
+#include "north/north_file_definitions.h"
 
 struct AutoRunSubsystem {
    string name;
@@ -178,11 +178,11 @@ void reloadFiles(DashboardState *state) {
 }
 
 void initDashboard(DashboardState *state) {
-   state->state_arena = VirtualAllocArena(Megabyte(24));
-   state->settings_arena = VirtualAllocArena(Megabyte(1));
-   state->auto_run_arena = VirtualAllocArena(Megabyte(20));
-   state->auto_programs_arena = VirtualAllocArena(Megabyte(20));
-   state->file_lists_arena = VirtualAllocArena(Megabyte(10));
+   state->state_arena = PlatformAllocArena(Megabyte(24));
+   state->settings_arena = PlatformAllocArena(Megabyte(1));
+   state->auto_run_arena = PlatformAllocArena(Megabyte(20));
+   state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
+   state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
 
    state->new_field.name_box.text = state->new_field.name_buffer;
@@ -195,80 +195,40 @@ void initDashboard(DashboardState *state) {
    reloadFiles(state);
 }
 
-//TODO: move into a ui_utils file?
-#define SettingsRow(...) _SettingsRow(GEN_UI_ID, __VA_ARGS__)
-ui_numberbox _SettingsRow(ui_id id, element *page, char *label, u32 *num, char *suffix = "") {
-   element *row = Panel(page, RowLayout, V2(Size(page->bounds).x, 20), V2(0, 0), V2(0, 5));
-   Label(row, label, 20);
-   ui_numberbox result = _TextBox(id, row, num, 20);
-   Label(row, suffix, 20);
-   return result;
-}
-
-ui_numberbox _SettingsRow(ui_id id, element *page, char *label, f32 *num, char *suffix = "") {
-   element *row = Panel(page, RowLayout, V2(Size(page->bounds).x, 20), V2(0, 0), V2(0, 5));
-   Label(row, label, 20);
-   ui_numberbox result = _TextBox(id, row, num, 20);
-   Label(row, suffix, 20);
-   return result;
-}
-
-ui_textbox _SettingsRow(ui_id id, element *page, char *label, TextBoxData *text, char *suffix = "") {
-   element *row = Panel(page, RowLayout, V2(Size(page->bounds).x, 20), V2(0, 0), V2(0, 5));
-   Label(row, label, 20);
-   ui_textbox result = _TextBox(id, row, text, 20);
-   if(IsSelected(result.e))
-      Outline(result.e, GREEN);
-   Label(row, suffix, 20);
-   return result;
-}
-
-ui_checkbox _SettingsRow(ui_id id, element *page, char *label, u32 *value, u32 flag, 
-                         v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0))
-{
-   element *row = Panel(page, RowLayout, V2(Size(page->bounds).x, 20), V2(0, 0), V2(0, 5));
-   Label(row, label, 20);
-   ui_checkbox result = _CheckBox(id, row, value, flag, size, padding, margin);
-   return result;
-}
-
-struct ui_slide_animation {
-   bool init;
-   bool open;
-   f32 min;
-   f32 max;
-   f32 value;
-};
-
-#define SlideAnimation(...) _SlideAnimation(GEN_UI_ID, __VA_ARGS__)
-ui_slide_animation *_SlideAnimation(ui_id id, UIContext *context, f32 min, f32 max, f32 time) {
-   ui_slide_animation *result = (ui_slide_animation *) _GetOrAllocate(id, context, sizeof(ui_slide_animation));
-   
-   if(!result->init) {
-      result->init = true;
-      result->min = min;
-      result->value = min;
-      result->max = max;
-   } else {
-      //TODO: this
-      if(min != result->min){
-
-      }
-
-      if(max != result->max) {
-
-      }
-   }
-   
-   //TODO: time stuff, proper animations
-   result->value = Clamp(min, max, result->value + (result->open ? 5 : -5));
-
-   return result;
-}
-
-void DrawAutoProj(ui_field_topdown *field, AutoProjectLink *auto_proj) {
-   v2 p = GetPoint(field, auto_proj->starting_node->pos);
+void DrawAutoPath(ui_field_topdown *field, AutoPath *path);
+void DrawAutoNode(ui_field_topdown *field, AutoNode *node) {
+   v2 p = GetPoint(field, node->pos);
    Rectangle(field->e, RectCenterSize(p, V2(5, 5)), RED);
+
+   if(node->path_count > 1) {
+
+   }
+
+   for(u32 i = 0; i < node->path_count; i++) {
+      DrawAutoPath(field, node->out_paths + i);
+   }
+}
+
+void DrawAutoPath(ui_field_topdown *field, AutoPath *path) {
+   if(path->control_point_count == 0) {
+      Line(field->e, GetPoint(field, path->in_node->pos), GetPoint(field, path->out_node->pos), BLACK);
+   } else {
+      u32 point_count = path->control_point_count + 2;
+      v2 *all_points = PushTempArray(v2, point_count);
+      
+      all_points[0] = path->in_node->pos;
+      all_points[point_count - 1] = path->out_node->pos;
+      for(u32 i = 0; i < path->control_point_count; i++)
+         all_points[i + 1] = path->control_points[i];
+
+      DrawBezierCurve(field, all_points, point_count);
+   }
+
+   DrawAutoNode(field, path->out_node);
+}
+
+void DrawAutoProj(ui_field_topdown *field, AutoProjectLink *proj) {
+   DrawAutoNode(field, proj->starting_node);
 }
 
 void DrawHome(element *page, DashboardState *state) {
@@ -278,16 +238,6 @@ void DrawHome(element *page, DashboardState *state) {
       element *base = Panel(page, ColumnLayout, Size(page->bounds));
       ui_field_topdown field = FieldTopdown(base, state->field.image, state->field.size,
                                             Size(page->bounds).x);
-
-      /*
-      v2 points[] = { V2(-10, -10), V2(0, 0), V2(10, 0), V2(10, 10) };
-      DrawBezierCurve(&field, points, ArraySize(points));
-      
-      for(s32 i = 0; i < ArraySize(points); i++) {
-         v2 p = GetPoint(&field, points[i]);
-         Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
-      }
-      */
 
       v2 robot_size_px = state->robot.loaded ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
       for(u32 i = 0; i < state->field.starting_position_count; i++) {
@@ -308,11 +258,7 @@ void DrawHome(element *page, DashboardState *state) {
          }   
       }
 
-      /*
-      for(u32 i = 0; i < path_count; i++) {
-         DrawPath(field_topdown, path);
-      }
-      */
+      //TODO: draw live field tracking samples
 
       if(state->home_field.starting_pos_selected) {
          ui_slide_animation *auto_selector_anim = SlideAnimation(page->context, 50, 300, 3);

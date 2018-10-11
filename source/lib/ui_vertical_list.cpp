@@ -59,7 +59,7 @@ element *_VerticalList(ui_id id, element *parent, rect2 bounds) {
    ui_drag scroll_drag = DefaultDragInteraction(scroll_handle);
    Background(scroll_handle, IsHot(scroll_handle) ? RED : BLACK);
 
-   data->scroll_offset += scroll_drag.drag.y;
+   data->scroll_offset += scroll_drag.drag.y; //TODO: the scroll speed isnt 1:1, the bigger last_length the faster we should scroll
    data->scroll_offset = Clamp(0, Max(0, max_offset), data->scroll_offset);
 
    return content;

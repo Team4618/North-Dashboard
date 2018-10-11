@@ -230,9 +230,29 @@ void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path) {
    f32 deccel = ParseAutoValue(file, arena);
    f32 max_vel = ParseAutoValue(file, arena);
 
+   //--
    string conditional = ConsumeString(file, file_path->conditional_length);
+   //--
+   
+   path->control_point_count = file_path->control_point_count;
    v2 *control_points = ConsumeArray(file, v2, file_path->control_point_count);
-   //TODO: events
+   path->control_points = (v2 *) PushCopy(arena, control_points, file_path->control_point_count * sizeof(v2));
+
+   //--
+   for(u32 i = 0; i < file_path->continuous_event_count; i++) {
+      AutonomousProgram_ContinuousEvent *file_event = ConsumeStruct(file, AutonomousProgram_ContinuousEvent);
+      string subsystem_name = ConsumeString(file, file_event->subsystem_name_length);
+      string command_name = ConsumeString(file, file_event->command_name_length);
+      AutonomousProgram_DataPoint *data_points = ConsumeArray(file, AutonomousProgram_DataPoint, file_event->datapoint_count);
+   }
+
+   for(u32 i = 0; i < file_path->discrete_event_count; i++) {
+      AutonomousProgram_DiscreteEvent *file_event = ConsumeStruct(file, AutonomousProgram_DiscreteEvent);
+      string subsystem_name = ConsumeString(file, file_event->subsystem_name_length);
+      string command_name = ConsumeString(file, file_event->command_name_length);
+      f32 *params = ConsumeArray(file, f32, file_event->parameter_count);
+   }
+   //--
 
    path->out_node = ParseAutoNode(file, arena);
 }
