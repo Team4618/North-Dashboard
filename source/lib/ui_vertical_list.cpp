@@ -65,8 +65,15 @@ element *_VerticalList(ui_id id, element *parent, rect2 bounds) {
    return content;
 }
 
+element *_VerticalList(ui_id id, element *parent) {
+   return _VerticalList(id, parent, parent->bounds);
+}
+
+//TODO: implement this
+/*
 element *_VerticalList(ui_id id, element *parent, v2 size, 
                        v2 padding = V2(0, 0), v2 margin = V2(0, 0)) {
    element *e = _Panel(id, parent, ColumnLayout, size, padding, margin);
    return e;
 }
+*/

@@ -7,7 +7,7 @@ void ResetDashboardState(DashboardState *state) {
       state->page = DashboardPage_Home;
    state->selected_subsystem = NULL;
    
-   state->robot.loaded = false;
+   state->robot.connected = false;
    state->robot.subsystems = NULL;
    state->robot.subsystem_count = 0;
    state->robot.name = EMPTY_STRING;
@@ -18,9 +18,7 @@ void PacketHandler_Welcome(buffer *packet, DashboardState *state) {
    string robot_name = ConsumeString(packet, header->robot_name_length);
 
    ResetDashboardState(state);
-   state->connected = true;
-
-   state->robot.loaded = true;
+   state->robot.connected = true;
    state->robot.name = PushCopy(&state->state_arena, robot_name);
    state->robot.size = V2(header->robot_width, header->robot_height);
 
@@ -98,14 +96,14 @@ bool HandlePacket(buffer packet, DashboardState *state) {
 #define PING_THRESHOLD 5
 
 void HandleConnectionStatus(DashboardState *state) {
-   if(state->connected) {
+   if(state->robot.connected) {
       if((state->curr_time - state->last_recieve_time) > DISCONNECT_TIMEOUT) {
-         state->connected = false;
+         state->robot.connected = false;
          ResetDashboardState(state);
       }
    }
    
-   if(!state->connected) {
+   if(!state->robot.connected) {
       //attempt to connect
    }
 

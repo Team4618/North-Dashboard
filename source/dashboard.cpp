@@ -36,47 +36,18 @@ enum DashboardPage {
 };
 
 #include "north/north_file_definitions.h"
+#include "auto_project_utils.cpp"
 
 struct AutoRunSubsystem {
    string name;
    MultiLineGraphData graph;
 };
 
-struct AutoPath;
-struct AutoNode {
-   v2 pos;
-   u32 path_count;
-   AutoPath *out_paths;
-};
-
-struct AutoPath {
-   AutoNode *in_node;
-   AutoNode *out_node;
-
-   u32 control_point_count;
-   v2 *control_points;
-};
-
-struct AutoProjectLink {
-   AutoNode *starting_node;
-
-   AutoProjectLink *next;
-};
-
+//TODO: redo/finalize all stuff for the currently connected robot
 struct DashboardState {
-   DashboardPage page;
-   Subsystem *selected_subsystem;
-   //selected_robot_profile
-   
-   GameMode prev_mode;
-   GameMode mode;
-
-   //TODO: we can either be connected or load robot data from a file
-   bool connected;
-
    MemoryArena state_arena; //TODO: change to robot_arena
    struct {
-      bool loaded;
+      bool connected;
       string name;
       v2 size;
 
@@ -130,14 +101,30 @@ struct DashboardState {
 
    MemoryArena auto_programs_arena;
    AutoProjectLink *first_auto_project;
+   
+   struct {
+      bool loaded;
+   } robot_profile;
 
    //MemoryArena recording_diagnostics_arena;
    bool recording_auto_diagnostics;
+
+   //--------------------------------------------------------
+   DashboardPage page;
+   Subsystem *selected_subsystem; //NOTE: this doesnt survive a reconnect!!
+   AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
+   AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
+   //selected_robot_profile
+   
+   GameMode prev_mode;
+   GameMode mode;
+   //--------------------------------------------------------
 
    bool directory_changed;
    MemoryArena file_lists_arena;
    FileListLink *ncff_files;
    FileListLink *ncar_files;
+   FileListLink *ncrp_files;
 
    f32 curr_time;
    f32 last_recieve_time;
@@ -162,9 +149,13 @@ void reloadFiles(DashboardState *state) {
    Reset(&state->file_lists_arena);
    state->ncff_files = ListFilesWithExtension("*.ncff", &state->file_lists_arena);
    state->ncar_files = ListFilesWithExtension("*.ncar", &state->file_lists_arena);
+   state->ncrp_files = ListFilesWithExtension("*.ncrp", &state->file_lists_arena);
    
    Reset(&state->auto_programs_arena);
    state->first_auto_project = NULL;
+
+   state->selected_auto_project = NULL;
+   state->selected_auto_node = NULL;
 
    for(FileListLink *file = ListFilesWithExtension("*.ncap"); file; file = file->next) {
       AutoProjectLink *auto_proj = ReadAutoProject(file->name, &state->auto_programs_arena);
@@ -195,21 +186,27 @@ void initDashboard(DashboardState *state) {
    reloadFiles(state);
 }
 
-void DrawAutoPath(ui_field_topdown *field, AutoPath *path);
-void DrawAutoNode(ui_field_topdown *field, AutoNode *node) {
+void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path, bool preview);
+void DrawAutoNode(DashboardState *state, ui_field_topdown *field, AutoNode *node, bool preview) {
    v2 p = GetPoint(field, node->pos);
-   Rectangle(field->e, RectCenterSize(p, V2(5, 5)), RED);
-
-   if(node->path_count > 1) {
-
+   
+   if((node->path_count > 1) && !preview) {
+      UI_SCOPE(field->e->context, node);
+      element *node_selector = Panel(field->e, NULL, RectCenterSize(p, V2(10, 10)));
+      Background(node_selector, RED);
+      if(DefaultClickInteraction(node_selector).clicked) {
+         state->selected_auto_node = node;
+      }
+   } else {
+      Rectangle(field->e, RectCenterSize(p, V2(5, 5)), RED);
    }
 
    for(u32 i = 0; i < node->path_count; i++) {
-      DrawAutoPath(field, node->out_paths + i);
+      DrawAutoPath(state, field, node->out_paths + i, preview);
    }
 }
 
-void DrawAutoPath(ui_field_topdown *field, AutoPath *path) {
+void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path, bool preview) {
    if(path->control_point_count == 0) {
       Line(field->e, GetPoint(field, path->in_node->pos), GetPoint(field, path->out_node->pos), BLACK);
    } else {
@@ -224,11 +221,7 @@ void DrawAutoPath(ui_field_topdown *field, AutoPath *path) {
       DrawBezierCurve(field, all_points, point_count);
    }
 
-   DrawAutoNode(field, path->out_node);
-}
-
-void DrawAutoProj(ui_field_topdown *field, AutoProjectLink *proj) {
-   DrawAutoNode(field, proj->starting_node);
+   DrawAutoNode(state, field, path->out_node, preview);
 }
 
 void DrawHome(element *page, DashboardState *state) {
@@ -239,7 +232,7 @@ void DrawHome(element *page, DashboardState *state) {
       ui_field_topdown field = FieldTopdown(base, state->field.image, state->field.size,
                                             Size(page->bounds).x);
 
-      v2 robot_size_px = state->robot.loaded ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
+      v2 robot_size_px = state->robot.connected ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
       for(u32 i = 0; i < state->field.starting_position_count; i++) {
          Field_StartingPosition *starting_pos = state->field.starting_positions + i;
          element *field_starting_pos = _Panel(POINTER_UI_ID(starting_pos), field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
@@ -255,30 +248,44 @@ void DrawHome(element *page, DashboardState *state) {
          if(starting_pos_click.clicked) {
             state->home_field.starting_pos_selected = true;
             state->home_field.starting_pos = starting_pos->pos;
+            //TODO: send starting pos to robot
          }   
       }
 
-      //TODO: draw live field tracking samples
+      if(state->robot.connected) {
+         //TODO: draw live field tracking samples
+         //TODO: draw current auto path
+      }
 
       if(state->home_field.starting_pos_selected) {
-         ui_slide_animation *auto_selector_anim = SlideAnimation(page->context, 50, 300, 3);
-         v2 selector_pos = V2(page->bounds.max.x - auto_selector_anim->value, page->bounds.min.y + 5);
-         element *auto_selector = VerticalList(page, RectMinSize(selector_pos, V2(300, Size(page->bounds).y - 10)));
-         auto_selector_anim->open = ContainsCursor(auto_selector);
+         element *auto_selector = VerticalList(SlidingSidePanel(page, 300, 5, 50, true));
          Background(auto_selector, V4(0.5, 0.5, 0.5, 0.5));
 
+         bool drawing_auto_preview = false;
          Label(auto_selector, "Autos", 20);
          for(AutoProjectLink *auto_proj = state->first_auto_project; auto_proj; auto_proj = auto_proj->next) {
             UI_SCOPE(auto_selector->context, auto_proj);
 
-            ui_button btn = Button(auto_selector, menu_button, "AUTOTEST");
+            ui_button btn = Button(auto_selector, menu_button, auto_proj->name);
 
             if(btn.clicked) {
-
+               state->selected_auto_project = auto_proj;
             }
 
             if(IsHot(btn.e)) {
-               DrawAutoProj(&field, auto_proj);
+               DrawAutoNode(state, &field, auto_proj->starting_node, true);
+               drawing_auto_preview = true;
+            }
+         }
+
+         if(state->selected_auto_node) {
+            //TODO: reorder path priorities
+         }
+
+         if(state->selected_auto_project) {
+            DrawAutoNode(state, &field, state->selected_auto_project->starting_node, false);
+            if(Button(base, menu_button, "Upload Auto").clicked) {
+               //TODO: upload auto
             }
          }
       }
@@ -293,8 +300,8 @@ void DrawSubsystem(element *page, Subsystem *subsystem) {
 
 void DrawAutoRuns(element *full_page, DashboardState *state) {
    StackLayout(full_page);
-   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min + V2(50, 0), 
-                                                      full_page->bounds.max - V2(50, 0)));
+   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
+                                                      full_page->bounds.max - V2(60, 0)));
    Outline(page, BLACK);
 
    if(state->auto_run.loaded) {
@@ -329,12 +336,9 @@ void DrawAutoRuns(element *full_page, DashboardState *state) {
       Label(page, "No run selected", 20);
    }
    
-   ui_slide_animation *run_selector_anim = SlideAnimation(page->context, 50, 300, 3);
-   v2 selector_pos = V2(full_page->bounds.max.x - run_selector_anim->value, full_page->bounds.min.y + 5);
-   element *run_selector = VerticalList(full_page, RectMinSize(selector_pos, V2(300, Size(full_page->bounds).y - 10)));
+   element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
    Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
-   run_selector_anim->open = ContainsCursor(run_selector);
-
+   
    for(FileListLink *file = state->ncar_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
          ReadAutonomousRun(state, file->name);
@@ -342,14 +346,27 @@ void DrawAutoRuns(element *full_page, DashboardState *state) {
    }
 }
 
-void DrawRobots(element *page, DashboardState *state) {
+void DrawRobots(element *full_page, DashboardState *state) {
+   StackLayout(full_page);
+   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
+                                                      full_page->bounds.max - V2(60, 0)));
 
+
+
+   element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
+   Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
+
+   for(FileListLink *file = state->ncrp_files; file; file = file->next) {
+      if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
+         
+      }
+   }
 }
 
 //TODO: do we want to save settings & field data every time a change is made or have a "save" button?
 void DrawSettings(element *full_page, DashboardState *state) {
    StackLayout(full_page);
-   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min + V2(60, 0), 
+   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
                                                       full_page->bounds.max - V2(60, 0)));
    
    Label(page, "Settings", 50);
@@ -374,7 +391,7 @@ void DrawSettings(element *full_page, DashboardState *state) {
 
       ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, Size(page->bounds).x);
 
-      v2 robot_size_px = state->robot.loaded ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
+      v2 robot_size_px = state->robot.connected ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
       for(u32 i = 0; i < state->field.starting_position_count; i++) {
          Field_StartingPosition *starting_pos = state->field.starting_positions + i;
          UI_SCOPE(page->context, starting_pos);
@@ -434,12 +451,9 @@ void DrawSettings(element *full_page, DashboardState *state) {
       Label(page, Concat(state->field_name, Literal(".ncff not found")), 20);
    }
 
-   ui_slide_animation *field_selector_anim = SlideAnimation(full_page->context, 50 /*min*/, 300 /*max*/, 3 /*sec*/);
-   v2 selector_pos = V2(full_page->bounds.max.x - field_selector_anim->value, full_page->bounds.min.y + 5);
-   element *field_selector = VerticalList(full_page, RectMinSize(selector_pos, V2(300, Size(full_page->bounds).y - 10)));
+   element *field_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 50, true));
    Background(field_selector, V4(0.5, 0.5, 0.5, 0.5));
-   field_selector_anim->open = ContainsCursor(field_selector);
-
+   
    Label(field_selector, "Fields", 50); //TODO: center this
    
    for(FileListLink *file = state->ncff_files; file; file = file->next) {
@@ -492,10 +506,10 @@ void DrawUI(element *root, DashboardState *state) {
    
    element *top_bar = Panel(root, RowLayout, V2(Size(root->bounds).x, 20));
    DefaultClickInteraction(top_bar);
-   HoverTooltip(top_bar, state->connected ? "Connected" : "Not Connected");
+   HoverTooltip(top_bar, state->robot.connected ? "Connected" : "Not Connected");
    
    Background(top_bar, V4(0.5, 0.5, 0.5, 1));
-   if(state->connected) {
+   if(state->robot.connected) {
       Label(top_bar, state->robot.name, 20, V2(10, 0));
       Label(top_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, V2(10, 0));
    } else {
@@ -506,7 +520,8 @@ void DrawUI(element *root, DashboardState *state) {
    
    element *content = Panel(root, StackLayout, V2(Size(root->bounds).x, Size(root->bounds).y - 20));
    
-   element *page = Panel(content, ColumnLayout, Size(content->bounds));
+   element *page = Panel(content, ColumnLayout, 
+                         RectMinMax(content->bounds.min + V2(60, 0), content->bounds.max));
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
       case DashboardPage_Subsystem: DrawSubsystem(page, state->selected_subsystem); break;
@@ -515,25 +530,29 @@ void DrawUI(element *root, DashboardState *state) {
       case DashboardPage_Settings: DrawSettings(page, state); break;
    }
 
-   ui_slide_animation *menu_anim = SlideAnimation(root->context, -250, 0, 3);
-   rect2 menu_bounds = RectMinSize(V2(menu_anim->value, 5) + content->bounds.min, V2(300, Size(content->bounds).y - 10));
-   element *menu_bar = VerticalList(content, menu_bounds);
-   DefaultClickInteraction(menu_bar);
+   element *menu_bar = VerticalList(SlidingSidePanel(content, 300, 5, 50, false));
    Background(menu_bar, V4(0.5, 0.5, 0.5, 0.5));
-   menu_anim->open = ContainsCursor(menu_bar);
    
    if(Button(menu_bar, menu_button, "Home").clicked) {
       state->page = DashboardPage_Home;
    }
 
-   for(u32 i = 0; i < state->robot.subsystem_count; i++) {
-      Subsystem *subsystem = state->robot.subsystems + i; 
-      button_style style = menu_button;
-      style.colour = V4(0.55, 0, 0, 0.5);
-      if(_Button(POINTER_UI_ID(i), menu_bar, style, subsystem->name).clicked) {
-         state->page = DashboardPage_Subsystem;
-         state->selected_subsystem = subsystem;
+   if(state->robot.connected) {
+      element *divider1 = Panel(menu_bar, NULL, V2(Size(menu_bar->bounds).x - 40, 5), V2(10, 0));
+      Background(divider1, BLACK);
+
+      for(u32 i = 0; i < state->robot.subsystem_count; i++) {
+         Subsystem *subsystem = state->robot.subsystems + i; 
+         button_style style = menu_button;
+         style.colour = V4(0.55, 0, 0, 0.5);
+         if(_Button(POINTER_UI_ID(i), menu_bar, style, subsystem->name).clicked) {
+            state->page = DashboardPage_Subsystem;
+            state->selected_subsystem = subsystem;
+         }
       }
+
+      element *divider2 = Panel(menu_bar, NULL, V2(Size(menu_bar->bounds).x - 40, 5), V2(10, 0));
+      Background(divider2, BLACK);
    }
 
    if(Button(menu_bar, menu_button, "Auto Runs").clicked) {

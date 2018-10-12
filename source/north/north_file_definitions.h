@@ -58,6 +58,13 @@ struct Field_FileHeader {
 //-----------------------------------------------------------
 
 //-----------------------------------------------------------
+struct RobotProfile_Parameter {
+   u8 name_length; 
+   u8 value_count;
+   //char name[name_length]
+   //f32 [value_count]
+};
+
 namespace RobotProfile_CommandType {
    enum type {
       NonBlocking = 0,
@@ -76,8 +83,10 @@ struct RobotProfile_SubsystemCommand {
 
 struct RobotProfile_SubsystemDescription {
    u8 name_length;
+   u8 parameter_count;
    u8 command_count;
    //char name[name_length]
+   //RobotProfile_Parameter [parameter_count]
    //RobotProfile_SubsystemCommand [command_count]
 };
 
@@ -96,7 +105,7 @@ struct RobotProfile_FileHeader {
    u8 robot_name_length;
    u8 subsystem_count;
    f32 robot_width;
-   f32 robot_height;
+   f32 robot_length;
    u32 flags;
    //char robot_name[robot_name_length]
    //RobotProfile_SubsystemDescription [subsystem_count]

@@ -2,12 +2,13 @@
 #include "Ws2tcpip.h"
 #include "windows.h"
 #include "gl/gl.h"
-#include "wglext.h"
-#include "glext.h"
+#include "lib/wglext.h"
+#include "lib/glext.h"
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "lib/stb_image.h"
 
+#define COMMON_PLATFORM
 #include "lib/common.cpp"
 #include "lib/ui_core.cpp"
 #include "lib/ui_button.cpp"
@@ -20,156 +21,8 @@
 #include "lib/ui_misc_utils.cpp"
 
 #include "string_and_lexer.cpp"
-#include "lib/ui_impl_win32_opengl.cpp"
-
-struct image {
-   u32 *texels;
-   u32 width;
-   u32 height;
-   bool valid;
-};
-
-image ReadImage(char *path, bool in_exe_directory = false) {
-   image result = {};
-   buffer file = ReadEntireFile(path, in_exe_directory);
-
-   if(file.data != NULL) {
-      s32 width, height, channels;
-      u32 *data = (u32 *) stbi_load_from_memory((u8 *) file.data, file.size,
-                                                &width, &height, &channels, 0);
-      result.width = width;
-      result.height = height;
-      result.texels = data;
-      result.valid = true;
-
-      FreeEntireFile(&file);
-   }
-
-   return result;
-}
-
-image ReadImage(string path, bool in_exe_directory = false) {
-   return ReadImage(ToCString(path), in_exe_directory);
-}
-
-void FreeImage(image *i) {
-   if(i->valid)
-      stbi_image_free(i->texels);
-}
-
-texture loadTexture(char *path, bool in_exe_directory) {
-   texture result = {};
-   image img = ReadImage(path, in_exe_directory);
-   if(img.valid)
-      result = createTexture(img.texels, img.width, img.height);
-   FreeImage(&img);
-   return result;
-}
-
-texture createTexture(u32 *texels, u32 width, u32 height) {
-   texture result = {};
-   result.size = V2(width, height);
-      
-   glCreateTextures(GL_TEXTURE_2D, 1, &result.handle);
-   glTextureStorage2D(result.handle, 1, GL_RGBA8, width, height);
-   glTextureSubImage2D(result.handle, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, texels);
-   glTextureParameteri(result.handle, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-   glTextureParameteri(result.handle, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-   
-   return result;
-}
-
-void deleteTexture(texture tex) {
-   if(tex.handle != 0)
-      glDeleteTextures(1, &tex.handle); 
-}
-
-sdfFont loadFont(char *metaPath, char *texturePath) {
-   sdfFont result = {};
-   result.sdfTexture = loadTexture(texturePath, true);
-   
-   buffer fontMeta = ReadEntireFile(metaPath, true);
-   lexer metadata = { (char *) fontMeta.data };
-   
-   bool parsing = true;
-   while(parsing) {
-      token tkn = GetToken(&metadata);
-      
-      if(tkn.type == Token_End) {
-         parsing = false;
-      } else if(TokenIdentifier(tkn, Literal("char"))) {
-         u32 id = 0;
-         s32 x = 0;
-         s32 y = 0;
-         s32 width = 0;
-         s32 height = 0;
-         s32 xoffset = 0;
-         s32 yoffset = 0;
-         s32 xadvance = 0;
-         
-         while(true) {
-            token first = GetToken(&metadata);
-            
-            if(first.type == Token_NewLine) {
-               break;
-            } else if(TokenIdentifier(first, Literal("id"))) {
-               GetToken(&metadata); //Should always be =
-               id = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("x"))) {
-               GetToken(&metadata); //Should always be =
-               x = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("y"))) {
-               GetToken(&metadata); //Should always be =
-               y = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("width"))) {
-               GetToken(&metadata); //Should always be =
-               width = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("height"))) {
-               GetToken(&metadata); //Should always be =
-               height = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("xoffset"))) {
-               GetToken(&metadata); //Should always be =
-               xoffset = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("yoffset"))) {
-               GetToken(&metadata); //Should always be =
-               yoffset = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("xadvance"))) {
-               GetToken(&metadata); //Should always be =
-               xadvance = ParseS32(&metadata);
-            }
-         }
-         
-         if(id < ArraySize(result.glyphs)) {
-            glyphInfo glyph = {};
-            glyph.textureLocation = V2(x, y);
-            glyph.size = V2(width, height);
-            glyph.offset = V2(xoffset, yoffset);
-            glyph.xadvance = xadvance;
-            result.glyphs[id] = glyph;
-
-            result.max_char_width = Max(result.max_char_width, width);
-         }
-      } else if(TokenIdentifier(tkn, Literal("common"))) {
-         while(true) {
-            token first = GetToken(&metadata);
-            
-            if(first.type == Token_NewLine) {
-               break;
-            } else if(TokenIdentifier(first, Literal("lineHeight"))) {
-               GetToken(&metadata); //Should always be =
-               result.native_line_height = ParseS32(&metadata);
-            }
-         }
-      } else if(TokenIdentifier(tkn, Literal("info"))) {
-         
-      }
-   }
-   
-   FreeEntireFile(&fontMeta);
-   return result;
-}
-
 v2 window_size = V2(0, 0);
+#include "lib/ui_impl_win32_opengl.cpp"
 
 LRESULT CALLBACK WindowMessageEvent(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
    switch(message)
@@ -391,6 +244,24 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       WriteStruct(&test_auto_proj, &end);
 
       WriteEntireFile("test_auto_proj.ncap", test_auto_proj);
+   }
+
+   {
+      buffer test_robot = PushTempBuffer(Megabyte(1));
+
+      FileHeader numbers = header(ROBOT_PROFILE_MAGIC_NUMBER, ROBOT_PROFILE_CURR_VERSION);
+      RobotProfile_FileHeader header = {};
+      char robot_name[] = "test_bot";
+      header.robot_name_length = ArraySize(robot_name) - 1;
+      header.robot_width = 28;
+      header.robot_length = 28;
+      WriteStruct(&test_robot, &numbers);
+      WriteStruct(&test_robot, &header);
+      WriteArray(&test_robot, robot_name, header.robot_name_length);
+
+      
+
+      WriteEntireFile("test_robot.ncrp", test_robot);
    }
 
    LARGE_INTEGER frequency;
