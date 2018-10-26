@@ -19,12 +19,26 @@ string ToString(GameMode mode) {
    return EMPTY_STRING;
 }
 
-struct Subsystem {
+struct ConnectedParameter {
    string name;
-   //SubsystemCommand *commands;
-   u32 command_count;
+   bool is_array;
+   u32 length; //ignored if is_array is false
+   union {
+      f32 value; //is_array = false
+      f32 *values; //is_array = true
+   };
+};
 
+//TODO: something like this that sends the data over the network
+void SetParamValue(ConnectedParameter *param, f32 value) {
+
+}
+
+struct ConnectedSubsystem {
+   string name;
    MultiLineGraphData diagnostics_graph;
+   u32 param_count;
+   ConnectedParameter *params;
 };
 
 enum DashboardPage {
@@ -37,23 +51,26 @@ enum DashboardPage {
 
 #include "north/north_file_definitions.h"
 #include "auto_project_utils.cpp"
+#include "robot_profile_helper.cpp"
 
 struct AutoRunSubsystem {
    string name;
    MultiLineGraphData graph;
 };
 
-//TODO: redo/finalize all stuff for the currently connected robot
 struct DashboardState {
-   MemoryArena state_arena; //TODO: change to robot_arena
+   //TODO: change to connected_robot_arena & connected_robot
+   MemoryArena state_arena;
    struct {
       bool connected;
       string name;
       v2 size;
 
-      Subsystem *subsystems;
+      ConnectedSubsystem *subsystems;
       u32 subsystem_count;
    } robot;
+
+   RobotProfileHelper robot_profile_helper;
 
    MemoryArena settings_arena; //TODO: this is just being used for the field_name, maybe we can get rid of it
    u32 team_number;
@@ -101,17 +118,13 @@ struct DashboardState {
 
    MemoryArena auto_programs_arena;
    AutoProjectLink *first_auto_project;
-   
-   struct {
-      bool loaded;
-   } robot_profile;
 
    //MemoryArena recording_diagnostics_arena;
    bool recording_auto_diagnostics;
 
    //--------------------------------------------------------
    DashboardPage page;
-   Subsystem *selected_subsystem; //NOTE: this doesnt survive a reconnect!!
+   ConnectedSubsystem *selected_subsystem; //NOTE: this doesnt survive a reconnect!!
    AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
    AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
    //selected_robot_profile
@@ -175,6 +188,9 @@ void initDashboard(DashboardState *state) {
    state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
+
+   InitRobotProfileHelper(&state->robot_profile_helper,
+                          PlatformAllocArena(Megabyte(20)));
 
    state->new_field.name_box.text = state->new_field.name_buffer;
    state->new_field.name_box.size = ArraySize(state->new_field.name_buffer);
@@ -293,7 +309,7 @@ void DrawHome(element *page, DashboardState *state) {
    }
 }
 
-void DrawSubsystem(element *page, Subsystem *subsystem) {
+void DrawSubsystem(element *page, ConnectedSubsystem *subsystem) {
    Label(page, subsystem->name, 50);
    MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
 }
@@ -542,7 +558,7 @@ void DrawUI(element *root, DashboardState *state) {
       Background(divider1, BLACK);
 
       for(u32 i = 0; i < state->robot.subsystem_count; i++) {
-         Subsystem *subsystem = state->robot.subsystems + i; 
+         ConnectedSubsystem *subsystem = state->robot.subsystems + i; 
          button_style style = menu_button;
          style.colour = V4(0.55, 0, 0, 0.5);
          if(_Button(POINTER_UI_ID(i), menu_bar, style, subsystem->name).clicked) {

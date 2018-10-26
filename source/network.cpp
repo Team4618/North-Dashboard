@@ -22,14 +22,14 @@ void PacketHandler_Welcome(buffer *packet, DashboardState *state) {
    state->robot.name = PushCopy(&state->state_arena, robot_name);
    state->robot.size = V2(header->robot_width, header->robot_height);
 
-   state->robot.subsystems = PushArray(&state->state_arena, Subsystem, header->subsystem_count);
+   state->robot.subsystems = PushArray(&state->state_arena, ConnectedSubsystem, header->subsystem_count);
    state->robot.subsystem_count = header->subsystem_count;
 
    for(u32 i = 0; i < header->subsystem_count; i++) {
       Welcome_SubsystemDescription *desc = ConsumeStruct(packet, Welcome_SubsystemDescription);
       string subystem_name = ConsumeString(packet, desc->name_length);
       
-      Subsystem *subsystem = state->robot.subsystems + i;
+      ConnectedSubsystem *subsystem = state->robot.subsystems + i;
       subsystem->name = PushCopy(&state->state_arena, subystem_name);
       u32 diagnostics_graph_arena_size = Megabyte(2);
       MemoryArena diagnostics_graph_arena = NewMemoryArena(PushSize(&state->state_arena, diagnostics_graph_arena_size), 

@@ -10,6 +10,7 @@ struct glyphInfo {
    f32 xadvance;
 };
 
+//TODO: move to vector fonts (draw the beziers from the .ttf directly) 
 struct sdfFont {
    texture sdfTexture;
    f32 native_line_height;
@@ -222,7 +223,9 @@ struct element {
    u8 *layout_data;
    layout_callback layout_func;
 };
+//TODO: Size(element *e) = Size(e->bounds)
 
+//TODO: merge this into _Panel
 element *addElement(element *parent, ui_id id) {
    UIContext *context = parent->context;
    element *result = PushStruct(&context->frame_arena, element);
@@ -231,6 +234,8 @@ element *addElement(element *parent, ui_id id) {
    result->parent = parent;
    result->id = id + context->scope_id;
    
+   //TODO: when we change over to flag based interaction capture, handle interactions here
+
    if(parent->first_child == NULL) {
       parent->first_child = result;
    } else {

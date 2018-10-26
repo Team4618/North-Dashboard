@@ -58,6 +58,7 @@ struct Field_FileHeader {
 //-----------------------------------------------------------
 
 //-----------------------------------------------------------
+//TODO: this cant tell if its a length 1 array or a regular parameter
 struct RobotProfile_Parameter {
    u8 name_length; 
    u8 value_count;

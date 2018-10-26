@@ -132,7 +132,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       
       AutonomousRun_RobotStateSample states[20] = {};
       for(u32 i = 0; i < 20; i++) {
-         states[i] = {V2(1 + i, 0.5 * i), V2(1, 0), 0, i};
+         states[i] = {V2(1.0 + i, 0.5 * i), V2(1, 0), 0, (f32)i};
       }
       WriteArray(&test_auto_run, states, ArraySize(states));
 
@@ -146,14 +146,14 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       char diag_1_name[] = "diag1";
       AutonomousRun_DiagnosticSample diag_1_samples[10] = {};
       for(u32 i = 0; i < 10; i++) {
-         diag_1_samples[i] = {i, 2 * i};
+         diag_1_samples[i] = {(f32)i, 2.0f * i};
       }
 
       AutonomousRun_Diagnostic diag_2 = {5, 1, 10};
       char diag_2_name[] = "diag2";
       AutonomousRun_DiagnosticSample diag_2_samples[10] = {};
       for(u32 i = 0; i < 10; i++) {
-         diag_2_samples[i] = {i, i};
+         diag_2_samples[i] = {(f32)i, (f32)i};
       }
       //------------
 
