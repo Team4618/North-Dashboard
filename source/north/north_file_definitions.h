@@ -58,10 +58,10 @@ struct Field_FileHeader {
 //-----------------------------------------------------------
 
 //-----------------------------------------------------------
-//TODO: this cant tell if its a length 1 array or a regular parameter
 struct RobotProfile_Parameter {
+   u8 is_array;
    u8 name_length; 
-   u8 value_count;
+   u8 value_count; //Ignored if is_array is false
    //char name[name_length]
    //f32 [value_count]
 };
@@ -114,14 +114,14 @@ struct RobotProfile_FileHeader {
 //-----------------------------------------------------------
 
 //-----------------------------------------------------------
-struct AutonomousRun_SubsystemDiagnostics {
+struct RobotRecording_SubsystemDiagnostics {
    u8 name_length;
    u8 diagnostic_count;
    //char name[name_length]
-   //AutonomousRun_Diagnostic [diagnostic_count]
+   //RobotRecording_Diagnostic [diagnostic_count]
 };
 
-struct AutonomousRun_Diagnostic {
+struct RobotRecording_Diagnostic {
    enum unit_type {
       Unitless = 0,
       Feet = 1,
@@ -138,31 +138,31 @@ struct AutonomousRun_Diagnostic {
    u8 unit;
    u32 sample_count;
    //char name[name_length]
-   //AutonomousRun_DiagnosticSample [sample_count]
+   //RobotRecording_DiagnosticSample [sample_count]
 };
 
-struct AutonomousRun_DiagnosticSample {
+struct RobotRecording_DiagnosticSample {
    f32 value;
    f32 time;
 };
 
-struct AutonomousRun_RobotStateSample {
+struct RobotRecording_RobotStateSample {
    v2 pos;
    v2 vel;
    f32 angle;
    f32 time;
 };
 
-struct AutonomousRun_FileHeader {
-#define AUTONOMOUS_RUN_MAGIC_NUMBER RIFF_CODE("NCAR") 
-#define AUTONOMOUS_RUN_CURR_VERSION 0
+struct RobotRecording_FileHeader {
+#define ROBOT_RECORDING_MAGIC_NUMBER RIFF_CODE("NCRR") 
+#define ROBOT_RECORDING_CURR_VERSION 0
    u64 timestamp;
    u8 robot_name_length;
    u8 subsystem_count;
    u32 robot_state_sample_count;
    //char [robot_name_length]
-   //AutonomousRun_RobotStateSample [robot_state_sample_count]
-   //AutonomousRun_SubsystemDiagnostics [subsystem_count]
+   //RobotRecording_RobotStateSample [robot_state_sample_count]
+   //RobotRecording_SubsystemDiagnostics [subsystem_count]
 };
 //-----------------------------------------------------------
 

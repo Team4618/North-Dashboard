@@ -44,7 +44,7 @@ struct ConnectedSubsystem {
 enum DashboardPage {
    DashboardPage_Home,
    DashboardPage_Subsystem,
-   DashboardPage_AutoRuns,
+   DashboardPage_Recordings,
    DashboardPage_Robots,
    DashboardPage_Settings
 };
@@ -53,7 +53,7 @@ enum DashboardPage {
 #include "auto_project_utils.cpp"
 #include "robot_profile_helper.cpp"
 
-struct AutoRunSubsystem {
+struct SubsystemRecording {
    string name;
    MultiLineGraphData graph;
 };
@@ -96,7 +96,7 @@ struct DashboardState {
       TextBoxData image_file_box;
    } new_field;
    
-   MemoryArena auto_run_arena;
+   MemoryArena recording_arena;
    struct {
       bool loaded;
       string robot_name;
@@ -105,11 +105,11 @@ struct DashboardState {
       f32 curr_time;
 
       u32 robot_sample_count;
-      AutonomousRun_RobotStateSample *robot_samples;
+      RobotRecording_RobotStateSample *robot_samples;
 
       u32 subsystem_count;
-      AutoRunSubsystem *subsystems;
-   } auto_run;
+      SubsystemRecording *subsystems;
+   } recording;
 
    struct {
       bool starting_pos_selected;
@@ -120,7 +120,9 @@ struct DashboardState {
    AutoProjectLink *first_auto_project;
 
    //MemoryArena recording_diagnostics_arena;
-   bool recording_auto_diagnostics;
+   bool recording_auto;
+
+   bool manual_recording;
 
    //--------------------------------------------------------
    DashboardPage page;
@@ -135,10 +137,10 @@ struct DashboardState {
 
    bool directory_changed;
    MemoryArena file_lists_arena;
-   FileListLink *ncff_files;
-   FileListLink *ncar_files;
-   FileListLink *ncrp_files;
-
+   FileListLink *ncff_files; //Field 
+   FileListLink *ncrr_files; //Recording
+   FileListLink *ncrp_files; //Robot Profile
+   
    f32 curr_time;
    f32 last_recieve_time;
    f32 last_send_time;
@@ -161,7 +163,7 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
 void reloadFiles(DashboardState *state) {
    Reset(&state->file_lists_arena);
    state->ncff_files = ListFilesWithExtension("*.ncff", &state->file_lists_arena);
-   state->ncar_files = ListFilesWithExtension("*.ncar", &state->file_lists_arena);
+   state->ncrr_files = ListFilesWithExtension("*.ncrr", &state->file_lists_arena);
    state->ncrp_files = ListFilesWithExtension("*.ncrp", &state->file_lists_arena);
    
    Reset(&state->auto_programs_arena);
@@ -184,7 +186,7 @@ void reloadFiles(DashboardState *state) {
 void initDashboard(DashboardState *state) {
    state->state_arena = PlatformAllocArena(Megabyte(24));
    state->settings_arena = PlatformAllocArena(Megabyte(1));
-   state->auto_run_arena = PlatformAllocArena(Megabyte(20));
+   state->recording_arena = PlatformAllocArena(Megabyte(20));
    state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
@@ -314,19 +316,19 @@ void DrawSubsystem(element *page, ConnectedSubsystem *subsystem) {
    MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
 }
 
-void DrawAutoRuns(element *full_page, DashboardState *state) {
+void DrawRecordings(element *full_page, DashboardState *state) {
    StackLayout(full_page);
    element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
                                                       full_page->bounds.max - V2(60, 0)));
    Outline(page, BLACK);
 
-   if(state->auto_run.loaded) {
+   if(state->recording.loaded) {
       if(state->field.loaded) {
          ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, 
                                              Size(page->bounds).x);
 
-         for(s32 i = 0; i < state->auto_run.robot_sample_count; i++) {
-            AutonomousRun_RobotStateSample *sample = state->auto_run.robot_samples + i;
+         for(s32 i = 0; i < state->recording.robot_sample_count; i++) {
+            RobotRecording_RobotStateSample *sample = state->recording.robot_samples + i;
             v2 p = GetPoint(&field, sample->pos);
             Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
          }
@@ -335,14 +337,14 @@ void DrawAutoRuns(element *full_page, DashboardState *state) {
       }
 
       //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
-      HorizontalSlider(page, &state->auto_run.curr_time, state->auto_run.min_time, state->auto_run.max_time,
+      HorizontalSlider(page, &state->recording.curr_time, state->recording.min_time, state->recording.max_time,
                        V2(Size(page->bounds).x - 40, 40), V2(20, 20));
       
       //TODO: highlight robot at current slider time
       //TODO: draw vertical bar in multiline graph at t=curr_time
 
-      for(u32 i = 0; i < state->auto_run.subsystem_count; i++) {
-         AutoRunSubsystem *subsystem = state->auto_run.subsystems + i;
+      for(u32 i = 0; i < state->recording.subsystem_count; i++) {
+         SubsystemRecording *subsystem = state->recording.subsystems + i;
          UI_SCOPE(page->context, subsystem);
          Label(page, subsystem->name, 20);
          MultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
@@ -352,12 +354,12 @@ void DrawAutoRuns(element *full_page, DashboardState *state) {
       Label(page, "No run selected", 20);
    }
    
-   element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
-   Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
+   element *recording_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
+   Background(recording_selector, V4(0.5, 0.5, 0.5, 0.5));
    
-   for(FileListLink *file = state->ncar_files; file; file = file->next) {
-      if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
-         ReadAutonomousRun(state, file->name);
+   for(FileListLink *file = state->ncrr_files; file; file = file->next) {
+      if(_Button(POINTER_UI_ID(file), recording_selector, menu_button, file->name).clicked) {
+         ReadRecording(state, file->name);
       }
    }
 }
@@ -367,14 +369,60 @@ void DrawRobots(element *full_page, DashboardState *state) {
    element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
                                                       full_page->bounds.max - V2(60, 0)));
 
+   
+   if(state->robot_profile_helper.selected_profile) {
+      RobotProfile *profile = state->robot_profile_helper.selected_profile;
+      Label(page, profile->name, 20);
+      
+      for(u32 i = 0; i < profile->subsystem_count; i++) {
+         RobotProfileSubsystem *subsystem = profile->subsystems + i;
+         element *subsystem_page = Panel(page, ColumnLayout, V2(Size(page).x - 60, 400), V2(20, 0));
+         Background(subsystem_page, V4(0.5, 0.5, 0.5, 0.5));
 
+         Label(subsystem_page, subsystem->name, 20);
+         
+         Label(subsystem_page, "Parameters", 20, V2(0, 20));
+         for(u32 j = 0; j < subsystem->param_count; j++) {
+            RobotProfileParameter *param = subsystem->params + j;
+            if(param->is_array) {
+               Label(subsystem_page, Concat(param->name, Literal(": ")), 18, V2(20, 0));
+               for(u32 k = 0; k < param->length; k++) {
+                  Label(subsystem_page, ToString(param->values[k]), 18, V2(40, 0));
+               }
+            } else {
+               Label(subsystem_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, V2(20, 0));
+            }
+         }
+
+         Label(subsystem_page, "Commands", 20, V2(0, 20));
+         for(u32 j = 0; j < subsystem->command_count; j++) {
+            RobotProfileCommand *command = subsystem->commands + j;
+            //TODO: icon for command->type
+            string params = (command->param_count > 0) ? command->params[0] : EMPTY_STRING;
+            for(u32 k = 1; k < command->param_count; k++) {
+               params = Concat(params, Literal(", "), command->params[k]);
+            }
+            Label(subsystem_page, Concat(command->name, Literal("("), params, Literal(")")), 18, V2(20, 0));  
+         }
+      }
+   }
 
    element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
    Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
 
+   if(state->robot.connected) {
+      if(Button(run_selector, menu_button, "Connected Robot").clicked) {
+
+      }
+   }
+
    for(FileListLink *file = state->ncrp_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
-         
+         buffer loaded_file = ReadEntireFile(Concat(file->name, Literal(".ncrp")));
+         if(loaded_file.data != NULL) {
+            ParseProfileFile(&state->robot_profile_helper, loaded_file);
+         }
+         FreeEntireFile(&loaded_file);
       }
    }
 }
@@ -541,7 +589,7 @@ void DrawUI(element *root, DashboardState *state) {
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
       case DashboardPage_Subsystem: DrawSubsystem(page, state->selected_subsystem); break;
-      case DashboardPage_AutoRuns: DrawAutoRuns(page, state); break;
+      case DashboardPage_Recordings: DrawRecordings(page, state); break;
       case DashboardPage_Robots: DrawRobots(page, state); break;
       case DashboardPage_Settings: DrawSettings(page, state); break;
    }
@@ -571,8 +619,8 @@ void DrawUI(element *root, DashboardState *state) {
       Background(divider2, BLACK);
    }
 
-   if(Button(menu_bar, menu_button, "Auto Runs").clicked) {
-      state->page = DashboardPage_AutoRuns;
+   if(Button(menu_bar, menu_button, "Recordings").clicked) {
+      state->page = DashboardPage_Recordings;
    }
 
    if(Button(menu_bar, menu_button, "Robots").clicked) {
@@ -585,15 +633,15 @@ void DrawUI(element *root, DashboardState *state) {
 
    if((state->mode == GameMode_Autonomous) && 
       (state->prev_mode != GameMode_Autonomous)) {
-      state->recording_auto_diagnostics = true;
+      state->recording_auto = true;
    }
 
    if((state->mode != GameMode_Autonomous) && 
       (state->prev_mode == GameMode_Autonomous)) {
-      state->recording_auto_diagnostics = false;
+      state->recording_auto = false;
    }
 
-   if(state->recording_auto_diagnostics) {
+   if(state->recording_auto) {
       //TODO: log auto run diagnostics if running auto
    }
 

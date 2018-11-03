@@ -223,7 +223,10 @@ struct element {
    u8 *layout_data;
    layout_callback layout_func;
 };
-//TODO: Size(element *e) = Size(e->bounds)
+
+v2 Size(element *e) {
+   return Size(e->bounds);
+}
 
 //TODO: merge this into _Panel
 element *addElement(element *parent, ui_id id) {

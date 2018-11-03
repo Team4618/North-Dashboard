@@ -118,70 +118,71 @@ void WriteSettingsFile(DashboardState *state) {
    OutputDebugStringA("settings saved\n");
 }
 
-void ReadAutonomousRun(DashboardState *state, string file_name) {
-   Reset(&state->auto_run_arena);
-   buffer auto_run_file = ReadEntireFile(Concat(file_name, Literal(".ncar")));
-   state->auto_run.loaded = (auto_run_file.data != NULL);
-   if(auto_run_file.data != NULL) {
-      FileHeader *file_numbers = ConsumeStruct(&auto_run_file, FileHeader);
+void ReadRecording(DashboardState *state, string file_name) {
+   Reset(&state->recording_arena);
+   buffer recording_file = ReadEntireFile(Concat(file_name, Literal(".ncrr")));
+   state->recording.loaded = (recording_file.data != NULL);
+   if(recording_file.data != NULL) {
+      FileHeader *file_numbers = ConsumeStruct(&recording_file, FileHeader);
 
-      if((file_numbers->magic_number == AUTONOMOUS_RUN_MAGIC_NUMBER) && 
-         (file_numbers->version_number == AUTONOMOUS_RUN_CURR_VERSION))
+      if((file_numbers->magic_number == ROBOT_RECORDING_MAGIC_NUMBER) && 
+         (file_numbers->version_number == ROBOT_RECORDING_CURR_VERSION))
       {
-         AutonomousRun_FileHeader *header = ConsumeStruct(&auto_run_file, AutonomousRun_FileHeader);
+         RobotRecording_FileHeader *header = ConsumeStruct(&recording_file, RobotRecording_FileHeader);
          
-         string robot_name = ConsumeString(&auto_run_file, header->robot_name_length);
+         state->recording.robot_name = PushCopy(&state->recording_arena,
+            ConsumeString(&recording_file, header->robot_name_length));
 
-         AutonomousRun_RobotStateSample *robot_samples =
-            ConsumeArray(&auto_run_file, AutonomousRun_RobotStateSample, header->robot_state_sample_count);
+         RobotRecording_RobotStateSample *robot_samples =
+            ConsumeArray(&recording_file, RobotRecording_RobotStateSample, header->robot_state_sample_count);
          
          if(header->robot_state_sample_count > 0) {
-            state->auto_run.robot_sample_count = header->robot_state_sample_count;
-            state->auto_run.robot_samples = (AutonomousRun_RobotStateSample *) PushCopy(&state->auto_run_arena, robot_samples,
-                                             header->robot_state_sample_count * sizeof(AutonomousRun_RobotStateSample));
+            state->recording.robot_sample_count = header->robot_state_sample_count;
+            state->recording.robot_samples = (RobotRecording_RobotStateSample *) PushCopy(&state->recording_arena, robot_samples,
+                                             header->robot_state_sample_count * sizeof(RobotRecording_RobotStateSample));
          
-            state->auto_run.min_time = F32_MAX;
-            state->auto_run.max_time = -F32_MAX;
+            state->recording.min_time = F32_MAX;
+            state->recording.max_time = -F32_MAX;
             
             for(u32 i = 0; i < header->robot_state_sample_count; i++) {
-               AutonomousRun_RobotStateSample *sample = robot_samples + i;
-               state->auto_run.min_time = Min(state->auto_run.min_time, sample->time);
-               state->auto_run.max_time = Max(state->auto_run.max_time, sample->time);
+               RobotRecording_RobotStateSample *sample = robot_samples + i;
+               state->recording.min_time = Min(state->recording.min_time, sample->time);
+               state->recording.max_time = Max(state->recording.max_time, sample->time);
             }
 
-            state->auto_run.curr_time = state->auto_run.min_time;
+            state->recording.curr_time = state->recording.min_time;
          }
 
-         AutoRunSubsystem *subsystems = PushArray(&state->auto_run_arena, AutoRunSubsystem, header->subsystem_count);
-         state->auto_run.subsystem_count = header->subsystem_count;
-         state->auto_run.subsystems = subsystems;
+         SubsystemRecording *subsystems = PushArray(&state->recording_arena, SubsystemRecording, header->subsystem_count);
+         state->recording.subsystem_count = header->subsystem_count;
+         state->recording.subsystems = subsystems;
 
          for(u32 i = 0; i < header->subsystem_count; i++) {
-            AutoRunSubsystem *subsystem_graph = subsystems + i;
-            AutonomousRun_SubsystemDiagnostics *subsystem = 
-               ConsumeStruct(&auto_run_file, AutonomousRun_SubsystemDiagnostics);
+            SubsystemRecording *subsystem_graph = subsystems + i;
+            RobotRecording_SubsystemDiagnostics *subsystem = 
+               ConsumeStruct(&recording_file, RobotRecording_SubsystemDiagnostics);
 
-            subsystem_graph->name = PushCopy(&state->auto_run_arena, 
-                                             ConsumeString(&auto_run_file, subsystem->name_length));
+            subsystem_graph->name = PushCopy(&state->recording_arena, 
+                                             ConsumeString(&recording_file, subsystem->name_length));
             
             u32 graph_arena_size = Megabyte(2);
-            MemoryArena graph_arena = NewMemoryArena(PushSize(&state->auto_run_arena, graph_arena_size), graph_arena_size); 
+            MemoryArena graph_arena = NewMemoryArena(PushSize(&state->recording_arena, graph_arena_size), graph_arena_size); 
 
             subsystem_graph->graph = NewMultiLineGraph(graph_arena);
             SetDiagnosticsGraphUnits(&subsystem_graph->graph);
 
             for(u32 j = 0; j < subsystem->diagnostic_count; j++) {
-               AutonomousRun_Diagnostic *line = ConsumeStruct(&auto_run_file, AutonomousRun_Diagnostic);
-               string line_name = PushCopy(&state->auto_run_arena, ConsumeString(&auto_run_file, line->name_length));
+               RobotRecording_Diagnostic *line = ConsumeStruct(&recording_file, RobotRecording_Diagnostic);
+               string line_name = PushCopy(&state->recording_arena, ConsumeString(&recording_file, line->name_length));
 
                for(u32 k = 0; k < line->sample_count; k++) {
-                  AutonomousRun_DiagnosticSample *sample = ConsumeStruct(&auto_run_file, AutonomousRun_DiagnosticSample);
+                  RobotRecording_DiagnosticSample *sample = ConsumeStruct(&recording_file, RobotRecording_DiagnosticSample);
                   AddEntry(&subsystem_graph->graph, line_name, sample->value, sample->time, line->unit);
                }
             }
          }
       }
 
-      FreeEntireFile(&auto_run_file);
+      FreeEntireFile(&recording_file);
    }
 }

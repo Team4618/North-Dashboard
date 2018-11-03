@@ -118,8 +118,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    {
       buffer test_auto_run = PushTempBuffer(Megabyte(1));
       
-      FileHeader numbers = header(AUTONOMOUS_RUN_MAGIC_NUMBER, AUTONOMOUS_RUN_CURR_VERSION);
-      AutonomousRun_FileHeader header = {};
+      FileHeader numbers = header(ROBOT_RECORDING_MAGIC_NUMBER, ROBOT_RECORDING_CURR_VERSION);
+      RobotRecording_FileHeader header = {};
       header.robot_name_length = 4;
       header.subsystem_count = 2;
       header.robot_state_sample_count = 20;
@@ -130,28 +130,28 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       char name[] = "test";
       WriteArray(&test_auto_run, name, 4);
       
-      AutonomousRun_RobotStateSample states[20] = {};
+      RobotRecording_RobotStateSample states[20] = {};
       for(u32 i = 0; i < 20; i++) {
          states[i] = {V2(1.0 + i, 0.5 * i), V2(1, 0), 0, (f32)i};
       }
       WriteArray(&test_auto_run, states, ArraySize(states));
 
-      AutonomousRun_SubsystemDiagnostics subsystem_a = {11, 2};
+      RobotRecording_SubsystemDiagnostics subsystem_a = {11, 2};
       char subsystem_a_name[] = "subsystem_a";
       WriteStruct(&test_auto_run, &subsystem_a);
       WriteArray(&test_auto_run, subsystem_a_name, 11);
 
       //------------
-      AutonomousRun_Diagnostic diag_1 = {5, 1, 10};
+      RobotRecording_Diagnostic diag_1 = {5, 1, 10};
       char diag_1_name[] = "diag1";
-      AutonomousRun_DiagnosticSample diag_1_samples[10] = {};
+      RobotRecording_DiagnosticSample diag_1_samples[10] = {};
       for(u32 i = 0; i < 10; i++) {
          diag_1_samples[i] = {(f32)i, 2.0f * i};
       }
 
-      AutonomousRun_Diagnostic diag_2 = {5, 1, 10};
+      RobotRecording_Diagnostic diag_2 = {5, 1, 10};
       char diag_2_name[] = "diag2";
-      AutonomousRun_DiagnosticSample diag_2_samples[10] = {};
+      RobotRecording_DiagnosticSample diag_2_samples[10] = {};
       for(u32 i = 0; i < 10; i++) {
          diag_2_samples[i] = {(f32)i, (f32)i};
       }
@@ -165,7 +165,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       WriteArray(&test_auto_run, diag_2_name, 5);
       WriteArray(&test_auto_run, diag_2_samples, 10);
 
-      AutonomousRun_SubsystemDiagnostics subsystem_b = {11, 2};
+      RobotRecording_SubsystemDiagnostics subsystem_b = {11, 2};
       char subsystem_b_name[] = "subsystem_b";
       WriteStruct(&test_auto_run, &subsystem_b);
       WriteArray(&test_auto_run, subsystem_b_name, 11);
@@ -178,7 +178,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       WriteArray(&test_auto_run, diag_2_name, 5);
       WriteArray(&test_auto_run, diag_2_samples, 10);
 
-      WriteEntireFile("test_auto_run.ncar", test_auto_run);
+      WriteEntireFile("test_auto_run.ncrr", test_auto_run);
    }
 
    {
@@ -255,11 +255,55 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       header.robot_name_length = ArraySize(robot_name) - 1;
       header.robot_width = 28;
       header.robot_length = 28;
+      header.subsystem_count = 1;
       WriteStruct(&test_robot, &numbers);
       WriteStruct(&test_robot, &header);
-      WriteArray(&test_robot, robot_name, header.robot_name_length);
+      WriteArray(&test_robot, robot_name, header.robot_name_length);      
 
-      
+      RobotProfile_SubsystemDescription test_subsystem = {};
+      char test_subsystem_name[] = "subsystem_a";
+      test_subsystem.name_length = ArraySize(test_subsystem_name) - 1;
+      test_subsystem.parameter_count = 3;
+      test_subsystem.command_count = 1;
+      WriteStruct(&test_robot, &test_subsystem);
+      WriteArray(&test_robot, test_subsystem_name, test_subsystem.name_length);
+
+      f32 test_value = 1;
+
+      RobotProfile_Parameter test_p = {};
+      char test_p_name[] = "P";
+      test_p.name_length = ArraySize(test_p_name) - 1;
+      WriteStruct(&test_robot, &test_p);
+      WriteArray(&test_robot, test_p_name, test_p.name_length);
+      WriteStruct(&test_robot, &test_value);
+
+      RobotProfile_Parameter test_i = {};
+      char test_i_name[] = "I";
+      test_i.name_length = ArraySize(test_i_name) - 1;
+      WriteStruct(&test_robot, &test_i);
+      WriteArray(&test_robot, test_i_name, test_i.name_length);
+      WriteStruct(&test_robot, &test_value);
+
+      RobotProfile_Parameter test_d = {};
+      char test_d_name[] = "D";
+      test_d.name_length = ArraySize(test_d_name) - 1;
+      WriteStruct(&test_robot, &test_d);
+      WriteArray(&test_robot, test_d_name, test_d.name_length);
+      WriteStruct(&test_robot, &test_value);
+
+      RobotProfile_SubsystemCommand test_command = {};
+      char test_command_name[] = "do_the_thing";
+      test_command.name_length = ArraySize(test_command_name) - 1;
+      test_command.param_count = 2;
+      WriteStruct(&test_robot, &test_command);
+      WriteArray(&test_robot, test_command_name, test_command.name_length);
+
+      char param_name[] = "test_param";
+      u8 param_name_length = ArraySize(param_name) - 1;
+      WriteStruct(&test_robot, &param_name_length);
+      WriteArray(&test_robot, param_name, param_name_length);
+      WriteStruct(&test_robot, &param_name_length);
+      WriteArray(&test_robot, param_name, param_name_length);
 
       WriteEntireFile("test_robot.ncrp", test_robot);
    }
