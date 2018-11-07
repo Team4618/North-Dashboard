@@ -23,6 +23,13 @@ typedef double f64;
 
 #define RIFF_CODE(str) ( ((str)[0] << 0) | ((str)[1] << 8) | ((str)[2] << 16) | ((str)[3] << 24) )
 
+#define ZeroStruct(var) _Zero((u8 *) (var), sizeof(*(var)))
+void _Zero(u8 *data, u32 size) {
+   for(u32 i = 0; i < size; i++) {
+      data[i] = 0;
+   }
+}
+
 void Copy(void *src_in, u32 size, void *dest_in) {
    u8 *src = (u8 *) src_in;
    u8 *dest = (u8 *) dest_in;

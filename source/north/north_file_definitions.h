@@ -122,20 +122,8 @@ struct RobotRecording_SubsystemDiagnostics {
 };
 
 struct RobotRecording_Diagnostic {
-   enum unit_type {
-      Unitless = 0,
-      Feet = 1,
-      FeetPerSecond = 2,
-      Degrees = 3,
-      DegreesPerSecond = 4,
-      Seconds = 5,
-      Percent = 6,
-      Amp = 7,
-      Volt = 8,
-   };
-
    u8 name_length;
-   u8 unit;
+   u8 unit; //NOTE: North_Unit
    u32 sample_count;
    //char name[name_length]
    //RobotRecording_DiagnosticSample [sample_count]
@@ -148,9 +136,24 @@ struct RobotRecording_DiagnosticSample {
 
 struct RobotRecording_RobotStateSample {
    v2 pos;
-   v2 vel;
    f32 angle;
    f32 time;
+};
+
+struct RobotRecording_Message {
+   u8 type; //NOTE North_MessageType
+   u16 length;
+   f32 begin_time;
+   f32 end_time;
+   //char message[length]
+};
+
+struct RobotRecording_Marker {
+   v2 pos;
+   u16 length;
+   f32 begin_time;
+   f32 end_time;
+   //char message[length]
 };
 
 struct RobotRecording_FileHeader {
@@ -160,9 +163,14 @@ struct RobotRecording_FileHeader {
    u8 robot_name_length;
    u8 subsystem_count;
    u32 robot_state_sample_count;
+   u32 message_count;
+   u32 marker_count; 
+
    //char [robot_name_length]
    //RobotRecording_RobotStateSample [robot_state_sample_count]
    //RobotRecording_SubsystemDiagnostics [subsystem_count]
+   //RobotRecording_Message [message_count]
+   //RoboRecording_Marker [marker_count]
 };
 //-----------------------------------------------------------
 

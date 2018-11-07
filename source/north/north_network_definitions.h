@@ -1,8 +1,18 @@
 #pragma pack(push, 1)
 
+/*
+NOTE:
+   Everything aside from state is sent over TCP socket 5800 
+   State is sent over UPD socket 5801
+*/
+
+struct PacketHeader {
+   u32 size; //NOTE: this lets packets be really big, our practical limit is much smaller than the 4 gb limit
+   u8 type; 
+};
+
 namespace PacketType {
    enum type {
-      Ping = 0,
       Connect = 1,
       Welcome = 2,
       CurrentParameters = 3,
@@ -13,11 +23,28 @@ namespace PacketType {
       UploadAutonomous = 8,
       //NOTE: if we change a packet just make a new type instead 
       //eg. "Welcome" becomes "Welcome_V1" & we create "Welcome_V2"
-      Count
    };
 };
 
 //------------------------------------------
+namespace Connect_Flags {
+   enum type {
+      WANTS_STATE = (1 << 0),
+   };
+};
+
+struct Connect_PacketHeader {
+   u8 flags;
+};
+
+//------------------------------------------
+
+//------------------------------------------
+//NOTE: everything in Welcome can only change if the robot was rebooted
+//      (eg. subsystems & commands)
+//      parameters are not in here because they change without a reboot
+//      (parameter names dont change without reboot though, so those could be here if we wanted)
+
 namespace Welcome_CommandType {
    enum type {
       NonBlocking = 0,
@@ -43,7 +70,7 @@ struct Welcome_SubsystemDescription {
 
 //NOTE: unused
 /*
-namespace WelcomeFlags {
+namespace Welcome_Flags {
    enum type {
 
    };
@@ -51,12 +78,10 @@ namespace WelcomeFlags {
 */
 
 struct Welcome_PacketHeader {
-   u8 packet_type;
-
    u8 robot_name_length;
    u8 subsystem_count;
    f32 robot_width;
-   f32 robot_height;
+   f32 robot_length;
    u32 flags;
    //char name[robot_name_length]
    //Welcome_SubsystemDescription [subsystem_count]
@@ -64,13 +89,15 @@ struct Welcome_PacketHeader {
 //-----------------------------------------
 
 //-----------------------------------------
-struct Parameter {
+struct CurrentParameters_Parameter {
+   u8 is_array;
    u8 name_length;
-   f32 value;
+   u8 value_count; //Ignored if is_array is false
    //char name[name_length]
+   //f32 [value_count]
 };
 
-struct SubsystemParameters {
+struct CurrentParameters_SubsystemParameters {
    u8 name_length;
    u8 param_count;
    //char name[name_length]
@@ -78,90 +105,73 @@ struct SubsystemParameters {
 };
 
 struct CurrentParameters_PacketHeader {
-   u8 packet_type;
    u8 subsystem_count;
    //SubsystemParameters [subsystem_count]
 };
 //----------------------------------------
 
 //-----------------------------------------
-struct SubsystemDiagnostics {
+struct State_Diagnostic {
+   u8 name_length;
+   f32 value;
+   u8 unit; //NOTE: North_Unit
+   //char name[name_length]
+};
+
+struct State_SubsystemDiagnostics {
    u8 name_length;
    u8 diagnostic_count;
    //char name[name_length]
-   //Diagnostic [diagnostic_count]
+   //State_Diagnostic [diagnostic_count]
 };
 
-struct Diagnostic {
-   enum unit_type {
-      Unitless = 0,
-      Feet = 1,
-      FeetPerSecond = 2,
-      Degrees = 3,
-      DegreesPerSecond = 4,
-      Seconds = 5,
-      Percent = 6,
-      Amp = 7,
-      Volt = 8,
-   };
-
-   u8 name_length;
-   f32 value;
-   u8 unit;
-   //char name[name_length]
-};
-
-struct RobotMessage {
-   enum message_type {
-      Message = 0,
-      Warning = 1,
-      Error = 2,
-      SubsystemOffline = 3,
-      ControlDescription = 4,
-   };
-
-   u8 type;
-   u8 length;
+struct State_Message {
+   u8 type; //NOTE: North_MessageType
+   u16 length;
    //char message[length]
 };
 
-/*
-enum GameMode {
-   GameMode_Disabled = 0,
-   GameMode_Autonomous = 1,
-   GameMode_Teleop = 2,
-   GameMode_Test = 3,
+struct State_Marker {
+   v2 pos;
+   u16 length;
+   //char message[length]
 };
-*/
+
+
 
 struct State_PacketHeader {
-   u8 packet_type; 
-   
    v2 pos;
-   v2 vel;
    f32 angle;
    
-   u8 mode;
+   u8 mode; //NOTE: North_GameMode
+
    u8 subsystem_count;
-   u8 robot_message_count;
+   u8 message_count;
+   u8 marker_count;
    f32 time;
    
-   //SubsystemDiagnostics [subsystem_count]
-   //RobotMessage [robot_message_count]
+   //State_SubsystemDiagnostics [subsystem_count]
+   //State_Message [message_count]
+   //State_Marker [marker_count]
 };
 //-----------------------------------------
 
-struct SetParameter_PacketHeader {
-   u8 packet_type;
+//--------------------------------------
+//TODO: add, remove, set
+
+struct ParameterOp_PacketHeader {
    u8 subsystem_name_length;
    u8 param_name_length;
+   
    f32 value;
+   u32 index;
+   
    //char [subsystem_name_length]
    //char [param_name_length]
 };
+//--------------------------------------
 
 struct SetState_PacketHeader {
-   u8 packet_type;
    v2 pos;
    f32 angle;
 };
@@ -176,7 +186,6 @@ struct CurrentAutoPath_Path {
 };
 
 struct CurrentAutoPath_PacketHeader {
-   u8 packet_type;
    u8 path_count;
    //Path [path_count]
 };

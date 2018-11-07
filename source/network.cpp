@@ -1,6 +1,5 @@
-#include "north/north_network_definitions.h"
-
 void ResetDashboardState(DashboardState *state) {
+   //TODO: Redo, this probably isnt correct anymore
    Reset(&state->state_arena);
 
    if(state->page == DashboardPage_Subsystem)
@@ -14,13 +13,15 @@ void ResetDashboardState(DashboardState *state) {
 }
 
 void PacketHandler_Welcome(buffer *packet, DashboardState *state) {
+   /**
+   TODO: Dashboard codepath
    Welcome_PacketHeader *header = ConsumeStruct(packet, Welcome_PacketHeader);
    string robot_name = ConsumeString(packet, header->robot_name_length);
 
    ResetDashboardState(state);
    state->robot.connected = true;
    state->robot.name = PushCopy(&state->state_arena, robot_name);
-   state->robot.size = V2(header->robot_width, header->robot_height);
+   state->robot.size = V2(header->robot_width, header->robot_length);
 
    state->robot.subsystems = PushArray(&state->state_arena, ConnectedSubsystem, header->subsystem_count);
    state->robot.subsystem_count = header->subsystem_count;
@@ -48,28 +49,38 @@ void PacketHandler_Welcome(buffer *packet, DashboardState *state) {
          }
       }
    }
+   **/
+
+   RecieveWelcomePacket(&state->robot_profile_helper, *packet);
 }
 
 void PacketHandler_CurrentParameters(buffer *packet, DashboardState *state) {
+   /**
+   TODO: Dashboard codepath
    CurrentParameters_PacketHeader *header = ConsumeStruct(packet, CurrentParameters_PacketHeader);
 
    for(u32 i = 0; i < header->subsystem_count; i++) {
-      SubsystemParameters *params = ConsumeStruct(packet, SubsystemParameters);
+      CurrentParameters_SubsystemParameters *params = ConsumeStruct(packet, CurrentParameters_SubsystemParameters);
       string subystem_name = ConsumeString(packet, params->name_length);
 
       for(u32 j = 0; j < params->param_count; j++) {
-         Parameter *param = ConsumeStruct(packet, Parameter);
+         CurrentParameters_Parameter *param = ConsumeStruct(packet, CurrentParameters_Parameter);
          string param_name = ConsumeString(packet, param->name_length);
       }
    }
+   */
+
+   RecieveCurrentParametersPacket(&state->robot_profile_helper, *packet);
 }
 
 void PacketHandler_State(buffer *packet, DashboardState *state) {
-
+   //TODO: Dashboard codepath
+   RecieveStatePacket(&state->auto_recorder, *packet);
+   RecieveStatePacket(&state->manual_recorder, *packet);
 }
 
 void PacketHandler_CurrentAutoPath(buffer *packet, DashboardState *state) {
-   
+   //TODO: Dashboard codepath
 }
 
 bool HandlePacket(buffer packet, DashboardState *state) {
@@ -94,6 +105,14 @@ bool HandlePacket(buffer packet, DashboardState *state) {
 //TODO: 5 seconds is a really long time
 #define DISCONNECT_TIMEOUT 5
 #define PING_THRESHOLD 5
+
+/**
+TODO: 
+   -redo networking
+   -we're split between TCP & UDP now
+   -no more ping packets
+   -packet types are now in a seperate header (the dispatcher will consume the header)
+**/
 
 void HandleConnectionStatus(DashboardState *state) {
    if(state->robot.connected) {

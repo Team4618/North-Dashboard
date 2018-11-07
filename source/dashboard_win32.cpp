@@ -132,7 +132,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       
       RobotRecording_RobotStateSample states[20] = {};
       for(u32 i = 0; i < 20; i++) {
-         states[i] = {V2(1.0 + i, 0.5 * i), V2(1, 0), 0, (f32)i};
+         states[i] = {V2(1.0 + i, 0.5 * i), 0, (f32)i};
       }
       WriteArray(&test_auto_run, states, ArraySize(states));
 

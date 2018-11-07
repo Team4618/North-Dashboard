@@ -1,25 +1,25 @@
-enum GameMode {
-   GameMode_Disabled = 0,
-   GameMode_Autonomous = 1,
-   GameMode_Teleop = 2,
-   GameMode_Test = 3,
-};
+#include "north/north_common_definitions.h"
+#include "north/north_file_definitions.h"
+#include "north/north_network_definitions.h"
 
-string ToString(GameMode mode) {
+string ToString(North_GameMode::type mode) {
    switch(mode) {
-      case GameMode_Disabled:
+      case North_GameMode::Disabled:
          return Literal("Disabled");
-      case GameMode_Autonomous:
+      case North_GameMode::Autonomous:
          return Literal("Autonomous");
-      case GameMode_Teleop:
+      case North_GameMode::Teleop:
          return Literal("Teleop");
-      case GameMode_Test:
+      case North_GameMode::Test:
          return Literal("Test");
    }
    return EMPTY_STRING;
 }
 
+struct ConnectedSubsystem;
 struct ConnectedParameter {
+   ConnectedSubsystem *subsystem;
+
    string name;
    bool is_array;
    u32 length; //ignored if is_array is false
@@ -30,13 +30,21 @@ struct ConnectedParameter {
 };
 
 //TODO: something like this that sends the data over the network
-void SetParamValue(ConnectedParameter *param, f32 value) {
-
+void SetParamValue(ConnectedParameter *param, f32 value, u32 index) {
+   buffer packet = PushTempBuffer(Megabyte(1));
+/*
+   ParameterOp_PacketHeader packet = {};
+   packet.packet_type = PacketType::SetParameter;
+   packet.subsystem_name_length = param->subsystem->name.length;
+   packet.param_name_length = param->name.length;
+   param->value =
+   */ 
 }
 
 struct ConnectedSubsystem {
    string name;
    MultiLineGraphData diagnostics_graph;
+   
    u32 param_count;
    ConnectedParameter *params;
 };
@@ -49,14 +57,20 @@ enum DashboardPage {
    DashboardPage_Settings
 };
 
-#include "north/north_file_definitions.h"
-#include "auto_project_utils.cpp"
-#include "robot_profile_helper.cpp"
+void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
+   SetUnit(data, 1 /*Feet*/, Literal("ft"));
+   SetUnit(data, 2 /*FeetPerSecond*/, Literal("ft/s"));
+   SetUnit(data, 3 /*Degrees*/, Literal("deg"));
+   SetUnit(data, 4 /*DegreesPerSecond*/, Literal("deg/s"));
+   SetUnit(data, 5 /*Seconds*/, Literal("s"));
+   SetUnit(data, 6 /*Percent*/, Literal("%"));
+   SetUnit(data, 7 /*Amp*/, Literal("amp"));
+   SetUnit(data, 8 /*Volt*/, Literal("volt"));
+}
 
-struct SubsystemRecording {
-   string name;
-   MultiLineGraphData graph;
-};
+#include "auto_project_utils.cpp"
+#include "robot_recording.cpp"
+#include "robot_profile_helper.cpp"
 
 struct DashboardState {
    //TODO: change to connected_robot_arena & connected_robot
@@ -96,20 +110,9 @@ struct DashboardState {
       TextBoxData image_file_box;
    } new_field;
    
-   MemoryArena recording_arena;
-   struct {
-      bool loaded;
-      string robot_name;
-      f32 min_time;
-      f32 max_time;
-      f32 curr_time;
-
-      u32 robot_sample_count;
-      RobotRecording_RobotStateSample *robot_samples;
-
-      u32 subsystem_count;
-      SubsystemRecording *subsystems;
-   } recording;
+   LoadedRobotRecording recording;
+   RobotRecorder auto_recorder;
+   RobotRecorder manual_recorder;
 
    struct {
       bool starting_pos_selected;
@@ -119,11 +122,6 @@ struct DashboardState {
    MemoryArena auto_programs_arena;
    AutoProjectLink *first_auto_project;
 
-   //MemoryArena recording_diagnostics_arena;
-   bool recording_auto;
-
-   bool manual_recording;
-
    //--------------------------------------------------------
    DashboardPage page;
    ConnectedSubsystem *selected_subsystem; //NOTE: this doesnt survive a reconnect!!
@@ -131,8 +129,8 @@ struct DashboardState {
    AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
    //selected_robot_profile
    
-   GameMode prev_mode;
-   GameMode mode;
+   North_GameMode::type prev_mode;
+   North_GameMode::type mode;
    //--------------------------------------------------------
 
    bool directory_changed;
@@ -145,17 +143,6 @@ struct DashboardState {
    f32 last_recieve_time;
    f32 last_send_time;
 };
-
-void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
-   SetUnit(data, 1 /*Feet*/, Literal("ft"));
-   SetUnit(data, 2 /*FeetPerSecond*/, Literal("ft/s"));
-   SetUnit(data, 3 /*Degrees*/, Literal("deg"));
-   SetUnit(data, 4 /*DegreesPerSecond*/, Literal("deg/s"));
-   SetUnit(data, 5 /*Seconds*/, Literal("s"));
-   SetUnit(data, 6 /*Percent*/, Literal("%"));
-   SetUnit(data, 7 /*Amp*/, Literal("amp"));
-   SetUnit(data, 8 /*Volt*/, Literal("volt"));
-}
 
 #include "theme.cpp"
 #include "file_io.cpp"
@@ -186,7 +173,7 @@ void reloadFiles(DashboardState *state) {
 void initDashboard(DashboardState *state) {
    state->state_arena = PlatformAllocArena(Megabyte(24));
    state->settings_arena = PlatformAllocArena(Megabyte(1));
-   state->recording_arena = PlatformAllocArena(Megabyte(20));
+   state->recording.arena = PlatformAllocArena(Megabyte(20));
    state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
@@ -241,6 +228,18 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
 
    DrawAutoNode(state, field, path->out_node, preview);
 }
+
+/**
+TODO:
+
+if(toggle_recording_button) {
+   if(manual_recording->recording) {
+      EndRecording("name")
+   } else {
+      BeginRecording()
+   }
+}
+**/
 
 void DrawHome(element *page, DashboardState *state) {
    StackLayout(page);
@@ -359,7 +358,7 @@ void DrawRecordings(element *full_page, DashboardState *state) {
    
    for(FileListLink *file = state->ncrr_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), recording_selector, menu_button, file->name).clicked) {
-         ReadRecording(state, file->name);
+         LoadRecording(&state->recording, file->name);
       }
    }
 }
@@ -631,18 +630,15 @@ void DrawUI(element *root, DashboardState *state) {
       state->page = DashboardPage_Settings;
    }
 
-   if((state->mode == GameMode_Autonomous) && 
-      (state->prev_mode != GameMode_Autonomous)) {
-      state->recording_auto = true;
+
+   if((state->mode == North_GameMode::Autonomous) && 
+      (state->prev_mode != North_GameMode::Autonomous)) {
+      BeginRecording(&state->auto_recorder);
    }
 
-   if((state->mode != GameMode_Autonomous) && 
-      (state->prev_mode == GameMode_Autonomous)) {
-      state->recording_auto = false;
-   }
-
-   if(state->recording_auto) {
-      //TODO: log auto run diagnostics if running auto
+   if((state->mode != North_GameMode::Autonomous) && 
+      (state->prev_mode == North_GameMode::Autonomous)) {
+      EndRecording(&state->auto_recorder, Literal("auto_recording"));
    }
 
    state->mode = state->prev_mode;

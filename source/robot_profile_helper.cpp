@@ -56,12 +56,119 @@ void InitRobotProfileHelper(RobotProfileHelper *state, MemoryArena arena) {
    state->selected_profile = NULL;
 }
 
-void RecieveWelcomePacket(RobotProfileHelper *state, buffer packet) {
+void EncodeProfileFile(RobotProfile *profile, buffer *file) {
+   //TODO: do this, memory to file format
+}
 
+void UpdateConnectedProfile(RobotProfileHelper *state) {
+   Assert(state->is_connected);
+
+   buffer file = PushTempBuffer(Megabyte(1));
+   EncodeProfileFile(&state->connected_robot, &file);
+   WriteEntireFile(Concat(state->connected_robot.name, Literal(".ncrp")), file);
+}
+
+void RecieveWelcomePacket(RobotProfileHelper *state, buffer packet) {
+   MemoryArena *arena = &state->connected_arena;
+   RobotProfile *profile = &state->connected_robot;
+
+   Reset(arena);
+   Welcome_PacketHeader *header = ConsumeStruct(&packet, Welcome_PacketHeader);
+   profile->name = PushCopy(arena, ConsumeString(&packet, header->robot_name_length));
+   profile->size = V2(header->robot_width, header->robot_length);
+   profile->subsystem_count = header->subsystem_count;
+   profile->subsystems = PushArray(arena, RobotProfileSubsystem, profile->subsystem_count);
+
+   for(u32 i = 0; i < header->subsystem_count; i++) {
+      Welcome_SubsystemDescription *desc = ConsumeStruct(&packet, Welcome_SubsystemDescription);
+      //TODO 
+   }
+
+   UpdateConnectedProfile(state);
+}
+
+RobotProfileSubsystem *GetSubsystem(RobotProfile *profile, string name) {
+   for(u32 i = 0; i < profile->subsystem_count; i++) {
+      RobotProfileSubsystem *subsystem = profile->subsystems + i;
+      if(subsystem->name == name) {
+         return subsystem;
+      }
+   }
+
+   return NULL;
+}
+
+RobotProfileParameter *GetParameter(RobotProfileSubsystem *subsystem, string name) {
+   for(u32 i = 0; i < subsystem->param_count; i++) {
+      RobotProfileParameter *param = subsystem->params + i;
+      if(param->name == name) {
+         return param;
+      }
+   }
+
+   return NULL;
+}
+
+void RecieveCurrentParametersPacket(RobotProfileHelper *state, buffer packet) {
+   Assert(state->is_connected);
+   MemoryArena *arena = &state->connected_arena;
+   RobotProfile *profile = &state->connected_robot;
+
+   CurrentParameters_PacketHeader *header = ConsumeStruct(&packet, CurrentParameters_PacketHeader);
+   for(u32 i = 0; i < header->subsystem_count; i++) {
+      CurrentParameters_SubsystemParameters *subsystem_params = ConsumeStruct(&packet, CurrentParameters_SubsystemParameters);
+      string name = ConsumeString(&packet, subsystem_params->name_length);
+      RobotProfileSubsystem *subsystem = GetSubsystem(profile, name);
+      Assert(subsystem != NULL);
+
+      if(subsystem->params == NULL) {
+         //NOTE: we're getting CurrentParameters for the first time
+         
+         subsystem->param_count = subsystem_params->param_count;
+         subsystem->params = PushArray(arena, RobotProfileParameter, subsystem->param_count);   
+      
+         for(u32 j = 0; j < subsystem_params->param_count; j++) {
+            RobotProfileParameter *param = subsystem->params + j;
+            CurrentParameters_Parameter *packet_param = ConsumeStruct(&packet, CurrentParameters_Parameter);
+            param->name = PushCopy(arena, ConsumeString(&packet, packet_param->name_length));
+            param->is_array = packet_param->is_array;
+            f32 *values = ConsumeArray(&packet, f32, param->is_array ? packet_param->value_count : 1);
+            if(param->is_array) {
+               param->length = packet_param->value_count;
+               param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
+            } else {
+               param->value = *values;
+            }
+         }
+      } else {
+         //NOTE: parameter values got changed
+
+         for(u32 j = 0; j < subsystem_params->param_count; j++) {
+            CurrentParameters_Parameter *packet_param = ConsumeStruct(&packet, CurrentParameters_Parameter);
+            string name = ConsumeString(&packet, packet_param->name_length);
+            f32 *values = ConsumeArray(&packet, f32, packet_param->is_array ? packet_param->value_count : 1);
+            
+            RobotProfileParameter *param = GetParameter(subsystem, name);
+            Assert(param != NULL);
+
+            if(param->is_array) {
+               param->length = packet_param->value_count;
+               param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
+            } else {
+               param->value = *values;
+            }
+         }
+      }
+   }
+
+   UpdateConnectedProfile(state);
 }
 
 void NetworkTimeout(RobotProfileHelper *state) {
-
+   state->is_connected = false;
+   if(state->selected_profile == &state->connected_robot) {
+      state->selected_profile = NULL;
+   }
 }
 
 void ParseProfileFile(RobotProfileHelper *state, buffer file) {
@@ -72,6 +179,7 @@ void ParseProfileFile(RobotProfileHelper *state, buffer file) {
    FileHeader *file_numbers = ConsumeStruct(&file, FileHeader);
    RobotProfile_FileHeader *header = ConsumeStruct(&file, RobotProfile_FileHeader);
    profile->name = PushCopy(arena, ConsumeString(&file, header->robot_name_length));
+   profile->size = V2(header->robot_width, header->robot_length);
    profile->subsystem_count = header->subsystem_count;
    profile->subsystems = PushArray(arena, RobotProfileSubsystem, header->subsystem_count);
 
