@@ -83,9 +83,7 @@ void PacketHandler_CurrentAutoPath(buffer *packet, DashboardState *state) {
    //TODO: Dashboard codepath
 }
 
-bool HandlePacket(buffer packet, DashboardState *state) {
-   u8 type = *PeekStruct(&packet, u8);
-   
+bool HandlePacket(DashboardState *state, PacketType::type type, buffer packet) {
    state->last_recieve_time = state->curr_time;
    
    if(type == PacketType::Welcome) {
@@ -113,20 +111,3 @@ TODO:
    -no more ping packets
    -packet types are now in a seperate header (the dispatcher will consume the header)
 **/
-
-void HandleConnectionStatus(DashboardState *state) {
-   if(state->robot.connected) {
-      if((state->curr_time - state->last_recieve_time) > DISCONNECT_TIMEOUT) {
-         state->robot.connected = false;
-         ResetDashboardState(state);
-      }
-   }
-   
-   if(!state->robot.connected) {
-      //attempt to connect
-   }
-
-   if((state->curr_time - state->last_send_time) > PING_THRESHOLD) {
-      //send ping
-   }
-}
