@@ -72,6 +72,12 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
 #include "robot_recording.cpp"
 #include "robot_profile_helper.cpp"
 
+/**
+TODO:
+-split this up into connected_robot, dashboard & dashboard_ui
+-get rid of file_io
+**/
+
 struct DashboardState {
    //TODO: change to connected_robot_arena & connected_robot
    MemoryArena state_arena;
@@ -178,8 +184,7 @@ void initDashboard(DashboardState *state) {
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
 
-   InitRobotProfileHelper(&state->robot_profile_helper,
-                          PlatformAllocArena(Megabyte(20)));
+   InitRobotProfileHelper(&state->robot_profile_helper, Megabyte(10));
 
    state->new_field.name_box.text = state->new_field.name_buffer;
    state->new_field.name_box.size = ArraySize(state->new_field.name_buffer);
@@ -630,6 +635,8 @@ void DrawUI(element *root, DashboardState *state) {
       state->page = DashboardPage_Settings;
    }
 
+   //TODO: end recordings when we disconnect
+   //TODO: move recordings to their own thread
 
    if((state->mode == North_GameMode::Autonomous) && 
       (state->prev_mode != North_GameMode::Autonomous)) {

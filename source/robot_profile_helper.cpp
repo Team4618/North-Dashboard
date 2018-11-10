@@ -49,10 +49,9 @@ struct RobotProfileHelper {
    RobotProfile *selected_profile;
 };
 
-void InitRobotProfileHelper(RobotProfileHelper *state, MemoryArena arena) {
-   u32 size = arena.size/2;
-   state->connected_arena = NewMemoryArena(PushSize(&arena, size), size);
-   state->loaded_arena = NewMemoryArena(PushSize(&arena, size), size);
+void InitRobotProfileHelper(RobotProfileHelper *state, u64 size) {
+   state->connected_arena = PlatformAllocArena(size);
+   state->loaded_arena = PlatformAllocArena(size);
    state->selected_profile = NULL;
 }
 

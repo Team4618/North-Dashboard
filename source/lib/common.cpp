@@ -154,31 +154,45 @@ bool IsUInt(string s) {
    return true;
 }
 
-//make this more advanced (eg. block based with a freelist)
-struct MemoryArena {
+//TODO: improve this
+struct MemoryArenaBlock {
+   MemoryArenaBlock *next;
    u64 size;
    u64 used;
    u8 *memory;
 };
 
-MemoryArena NewMemoryArena(void *memory, u64 size) {
-   MemoryArena result = {};
-   result.size = size;
-   result.used = 0;
-   result.memory = (u8 *)memory;
-   return result;
-}
+typedef MemoryArenaBlock *(*allocator_callback)(u64 size);
+
+struct MemoryArena {
+   allocator_callback allocator;
+   MemoryArenaBlock *first_block;
+   MemoryArenaBlock *curr_block;
+   u64 initial_size;
+};
 
 u8 *PushSize(MemoryArena *arena, u64 size) {
-   Assert((arena->used + size) <= arena->size);
-   u8 *result = (u8 *)arena->memory + arena->used;
-   arena->used += size;
- 
-   for(u32 i = 0; i < size; i++) {
-      result[i] = 0;
+   MemoryArenaBlock *curr_block = arena->curr_block;
+   if((curr_block->size - curr_block->used) <= size) {
+      if(curr_block->next == NULL) {
+         //TODO: what size should we allocate?
+         MemoryArenaBlock *new_block = arena->allocator(Max(arena->initial_size, size));
+         curr_block->next = new_block;
+         arena->curr_block = new_block;
+      } else {
+         arena->curr_block = curr_block->next; 
+      }
+
+      //TODO: this could technically get stuck in a loop, we need to test this new system
+      //the old one was super simple and this one isnt so much
+      return PushSize(arena, size);
+   } else {
+      u8 *result = curr_block->memory + curr_block->used;
+      curr_block->used += size;
+      _Zero(result, size);
+   
+      return result;
    }
- 
-   return result;
 }
 
 #define PushStruct(arena, struct) (struct *) PushSize(arena, sizeof(struct))
@@ -199,7 +213,13 @@ u8 *PushCopy(MemoryArena *arena, void *src, u32 size) {
 }
 
 void Reset(MemoryArena *arena) {
-   arena->used = 0;
+   for(MemoryArenaBlock *curr_block = arena->first_block;
+       curr_block; curr_block = curr_block->next)
+   {
+      curr_block->used = 0;
+   }
+   
+   arena->curr_block = arena->first_block;
 }
 
 struct buffer {
@@ -248,6 +268,10 @@ void WriteSize(buffer *b, void *in_data, u64 size) {
    Assert((b->size - b->offset) >= size);
    Copy(data, size, b->data + b->offset);
    b->offset += size;
+}
+
+void WriteString(buffer *b, string str) {
+   WriteArray(b, str.text, str.length);
 }
 
 MemoryArena __temp_arena;
@@ -330,6 +354,44 @@ char *ToCString(string str) {
 f32 Random01() {
    return (f32)rand() / (f32)RAND_MAX;
 }
+//------------------------------------------------
+
+//-----------------HASH-STUFF---------------------
+//------------------------------------------------
+
+//NOTE: tried to do this with templates, was ugly,
+//      tried with macros, also ugly, try again later
+
+/*
+#define HashAndListPointers(type) \
+   type *next_in_list; \
+   type *next_in_hash;
+
+#define GetOrCreate(result_name, thing_pointer, constructor) \
+   {\
+      auto thing = (thing_pointer); \
+      u32 hash = Hash(name) % ArraySize(state->subsystem_hash); \
+      for(auto *curr = thing->hash[hash]; curr; curr = curr->next_in_hash) { \
+         if(curr->name == name) { \
+            result_name = curr; \
+         } \
+      } \
+      \
+      if(result == NULL) { \
+         auto *new_subsystem = PushStruct(arena, RecorderSubsystem); \
+         new_subsystem->name = PushCopy(arena, name); \
+         \
+         new_subsystem->next_in_hash = state->subsystem_hash[hash]; \
+         new_subsystem->next_in_list = state->first_subsystem; \
+         \
+         state->subsystem_hash[hash] = new_subsystem; \
+         state->first_subsystem = new_subsystem; \
+         state->subsystem_count++; \
+         result = new_subsystem; \
+      } \
+   }
+*/
+
 //------------------------------------------------
 
 #define PI32 3.141592653589793238462
@@ -540,8 +602,24 @@ string exe_directory = {};
       #define READ_BARRIER MemoryBarrier()
       #define WRITE_BARRIER MemoryBarrier()
 
-      MemoryArena PlatformAllocArena(u64 size) {
-         return NewMemoryArena(VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE), size);
+      MemoryArenaBlock *PlatformAllocArenaBlock(u64 size) {
+         //OutputDebugStringA("Allocating Arena Block\n");
+         MemoryArenaBlock *result = (MemoryArenaBlock *) VirtualAlloc(0, sizeof(MemoryArenaBlock) + size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+         result->size = size;
+         result->used = 0;
+         result->next = 0;
+         result->memory = (u8 *) (result + 1);
+         return result;
+      }
+
+      MemoryArena PlatformAllocArena(u64 initial_size) {
+         MemoryArena result = {};
+         result.allocator = PlatformAllocArenaBlock;
+         result.first_block = PlatformAllocArenaBlock(initial_size);
+         result.curr_block = result.first_block;
+         result.initial_size = initial_size;
+
+         return result;
       }
 
       buffer ReadEntireFile(const char* path, bool in_exe_directory = false) {

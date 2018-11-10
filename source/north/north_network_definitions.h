@@ -137,8 +137,6 @@ struct State_Marker {
    //char message[length]
 };
 
-
-
 struct State_PacketHeader {
    v2 pos;
    f32 angle;
