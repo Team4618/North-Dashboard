@@ -30,6 +30,8 @@ void _Zero(u8 *data, u32 size) {
    }
 }
 
+#define ForEachArray(index, name, count, array, code) do { for(u32 index = 0; index < (count); index++){ auto name = (array) + index; code } } while(false)
+
 void Copy(void *src_in, u32 size, void *dest_in) {
    u8 *src = (u8 *) src_in;
    u8 *dest = (u8 *) dest_in;
@@ -273,6 +275,8 @@ void WriteSize(buffer *b, void *in_data, u64 size) {
 void WriteString(buffer *b, string str) {
    WriteArray(b, str.text, str.length);
 }
+
+#define WriteStructData(b, type, name, code) do { type name = {}; code WriteStruct(b, &name); } while(false)
 
 MemoryArena __temp_arena;
 

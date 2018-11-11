@@ -45,18 +45,10 @@ struct Connect_PacketHeader {
 //      parameters are not in here because they change without a reboot
 //      (parameter names dont change without reboot though, so those could be here if we wanted)
 
-namespace Welcome_CommandType {
-   enum type {
-      NonBlocking = 0,
-      Blocking = 1,
-      Continuous = 2,
-   };
-};
-
 struct Welcome_SubsystemCommand {
    u8 name_length;
    u8 param_count;
-   u8 type;
+   u8 type; //NOTE: North_CommandType
    //char name[name_length]
    //{ u8 length; char [length]; } [param_count]
 };

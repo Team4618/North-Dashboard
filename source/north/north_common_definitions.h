@@ -29,3 +29,11 @@ namespace North_MessageType {
       SubsystemOffline = 3
    };
 };
+
+namespace North_CommandType {
+   enum type {
+      NonBlocking = 0,
+      Blocking = 1,
+      Continuous = 2,
+   };
+};

@@ -66,18 +66,10 @@ struct RobotProfile_Parameter {
    //f32 [value_count]
 };
 
-namespace RobotProfile_CommandType {
-   enum type {
-      NonBlocking = 0,
-      Blocking = 1,
-      Continuous = 2,
-   };
-};
-
 struct RobotProfile_SubsystemCommand {
    u8 name_length;
    u8 param_count;
-   u8 type;
+   u8 type; //NOTE: North_CommandType
    //char name[name_length]
    //{ u8 length; char [length]; } [param_count]
 };

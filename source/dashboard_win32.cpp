@@ -259,11 +259,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
          u32 recv_return = recv(tcp_socket, (char *) &header, sizeof(header), 0);
          
          if(recv_return == SOCKET_ERROR) {
+            has_packets = false;
             s32 wsa_error = WSAGetLastError();
 
-            if(wsa_error == WSAEWOULDBLOCK) {
-               has_packets = false;
-            } else if(wsa_error != 0) {
+            if((wsa_error != 0) && (wsa_error != WSAEWOULDBLOCK)) {
                //an actual error happened
             }
          } else {

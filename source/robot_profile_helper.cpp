@@ -1,13 +1,7 @@
 //NOTE: requires common.cpp & the north defs
 
-enum RobotProfileCommandType {
-   RobotProfileCommandType_NonBlocking,
-   RobotProfileCommandType_Blocking,
-   RobotProfileCommandType_Continuous
-};
-
 struct RobotProfileCommand {
-   RobotProfileCommandType type;
+   North_CommandType::type type;
    string name;
    u32 param_count;
    string *params;
@@ -56,7 +50,50 @@ void InitRobotProfileHelper(RobotProfileHelper *state, u64 size) {
 }
 
 void EncodeProfileFile(RobotProfile *profile, buffer *file) {
-   //TODO: do this, memory to file format
+   WriteStructData(file, RobotProfile_FileHeader, s, {
+      s.robot_name_length = profile->name.length;
+      s.subsystem_count = profile->subsystem_count;
+      s.robot_width = profile->size.x;
+      s.robot_length = profile->size.y;
+   });
+   WriteString(file, profile->name);
+   
+   ForEachArray(i, subsystem, profile->subsystem_count, profile->subsystems, {
+      WriteStructData(file, RobotProfile_SubsystemDescription, s, {
+         s.name_length = subsystem->name.length;
+         s.parameter_count = subsystem->param_count;
+         s.command_count = subsystem->command_count; 
+      });
+      WriteString(file, subsystem->name);
+
+      ForEachArray(j, param, subsystem->param_count, subsystem->params, {
+         WriteStructData(file, RobotProfile_Parameter, s, {
+            s.name_length = param->name.length; 
+            s.is_array = param->is_array;
+            s.value_count = param->is_array ? param->length : 1;
+         });
+         WriteString(file, param->name);
+         if(param->is_array) {
+            WriteArray(file, param->values, param->length);
+         } else {
+            WriteStruct(file, &param->value);
+         }
+      });
+      
+      ForEachArray(j, command, subsystem->command_count, subsystem->commands, {
+         WriteStructData(file, RobotProfile_SubsystemCommand, s, {
+            s.name_length = command->name.length;
+            s.param_count = command->param_count;
+            s.type = (u8) command->type;
+         });
+         WriteString(file, command->name);
+         ForEachArray(k, param, command->param_count, command->params, {
+            u8 length = param->length;
+            WriteStruct(file, &length);
+            WriteString(file, *param);
+         });
+      });
+   });
 }
 
 void UpdateConnectedProfile(RobotProfileHelper *state) {
@@ -80,7 +117,26 @@ void RecieveWelcomePacket(RobotProfileHelper *state, buffer packet) {
 
    for(u32 i = 0; i < header->subsystem_count; i++) {
       Welcome_SubsystemDescription *desc = ConsumeStruct(&packet, Welcome_SubsystemDescription);
-      //TODO 
+      RobotProfileSubsystem *subsystem = profile->subsystems + i;
+      
+      subsystem->name = PushCopy(arena, ConsumeString(&packet, desc->name_length));
+      subsystem->command_count = desc->command_count;
+      subsystem->commands = PushArray(arena, RobotProfileCommand, subsystem->command_count);
+
+      for(u32 j = 0; j < desc->command_count; j++) {
+         Welcome_SubsystemCommand *command_desc = ConsumeStruct(&packet, Welcome_SubsystemCommand);
+         RobotProfileCommand *command = subsystem->commands + j;
+         
+         command->name = PushCopy(arena, ConsumeString(&packet, command_desc->name_length));
+         command->type = (North_CommandType::type) command_desc->type;
+         command->param_count = command_desc->param_count;
+         command->params = PushArray(arena, string, command->param_count);
+
+         for(u32 k = 0; k < command->param_count; k++) {
+            u8 length = *ConsumeStruct(&packet, u8);
+            command->params[k] = PushCopy(arena, ConsumeString(&packet, length));
+         }
+      }
    }
 
    UpdateConnectedProfile(state);
@@ -212,6 +268,7 @@ void ParseProfileFile(RobotProfileHelper *state, buffer file) {
          RobotProfileCommand *command = subsystem->commands + j;
          
          command->name = PushCopy(arena, ConsumeString(&file, file_command->name_length));
+         command->type = (North_CommandType::type) file_command->type;
          command->param_count = file_command->param_count;
          command->params = PushArray(arena, string, command->param_count);
 
