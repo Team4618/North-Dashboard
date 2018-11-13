@@ -108,6 +108,8 @@ void RecieveWelcomePacket(RobotProfileHelper *state, buffer packet) {
    MemoryArena *arena = &state->connected_arena;
    RobotProfile *profile = &state->connected_robot;
 
+   state->is_connected = true;
+
    Reset(arena);
    Welcome_PacketHeader *header = ConsumeStruct(&packet, Welcome_PacketHeader);
    profile->name = PushCopy(arena, ConsumeString(&packet, header->robot_name_length));

@@ -147,8 +147,6 @@ struct DashboardState {
    FileWatcher file_watcher;
    
    f32 curr_time;
-   f32 last_recieve_time;
-   f32 last_send_time;
 };
 
 #include "theme.cpp"
@@ -183,6 +181,8 @@ void initDashboard(DashboardState *state) {
    state->recording.arena = PlatformAllocArena(Megabyte(20));
    state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
+   state->auto_recorder.arena = PlatformAllocArena(Megabyte(10));
+   state->manual_recorder.arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
 
    InitRobotProfileHelper(&state->robot_profile_helper, Megabyte(10));
