@@ -642,8 +642,7 @@ string exe_directory = {};
             CloseHandle(file_handle);
          } else {
             OutputDebugStringA("File read error\n");
-            DWORD error_code = GetLastError(); 
-            u32 i = 0;
+            DWORD error_code = GetLastError();
          }
 
          return result;
@@ -677,6 +676,7 @@ string exe_directory = {};
       struct FileListLink {
          FileListLink *next;
          string name;
+         string full_name;
       };
 
       FileListLink *ListFilesWithExtension(char *wildcard_extension, MemoryArena *arena = &__temp_arena) {
@@ -686,20 +686,135 @@ string exe_directory = {};
          if(handle != INVALID_HANDLE_VALUE) {
             do {
                FileListLink *new_link = PushStruct(arena, FileListLink);
-               string name = Literal(file.cFileName);
-               for(u32 i = 0; i < name.length; i++) {
-                  if(name.text[i] == '.') {
-                     name.length = i;
+               string full_name = Literal(file.cFileName);
+               
+               if((full_name == Literal(".")) ||
+                  (full_name == Literal("..")))
+               {
+                  continue;
+               }
+               
+               u32 name_length = 0;
+               for(u32 i = 0; i < full_name.length; i++) {
+                  if(full_name.text[i] == '.') {
+                     name_length = i;
                      break;
                   }
                }
-               new_link->name = PushCopy(arena, name);
+               
+               new_link->full_name = PushCopy(arena, full_name);
+               new_link->name = String(new_link->full_name.text, name_length);
                new_link->next = result;
                result = new_link;
             } while(FindNextFileA(handle, &file));
          }
          return result;
       }
+   
+      u64 GetFileTimestamp(const char* path, bool in_exe_directory = false) {
+         char full_path[MAX_PATH + 1];
+         sprintf(full_path, "%.*s%s", exe_directory.length, exe_directory.text, path);
+         
+         FILETIME last_write_time;
+         HANDLE file_handle = CreateFileA(in_exe_directory ? full_path : path, GENERIC_READ, FILE_SHARE_READ,
+                                          NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+         
+         if(file_handle != INVALID_HANDLE_VALUE) {
+            GetFileTime(file_handle, NULL, NULL, &last_write_time);
+            CloseHandle(file_handle);
+         }
+         
+         return (u64)last_write_time.dwLowDateTime | 
+               ((u64)last_write_time.dwHighDateTime << 32);
+      }
+
+      u64 GetFileTimestamp(string path, bool in_exe_directory = false) {
+         return GetFileTimestamp(ToCString(path), in_exe_directory);
+      }
+
+      struct FileWatcherLink {
+         FileWatcherLink *next_in_list;
+         FileWatcherLink *next_in_hash;
+
+         bool found;
+
+         u64 timestamp;
+         string name;
+      };
+      
+      struct FileWatcher {
+         MemoryArena arena; //NOTE: this needs its own memory because it has to persist
+         string wildcard_extension;
+
+         FileWatcherLink *first_in_list;
+         FileWatcherLink *hash[64];
+      };
+
+      void InitFileWatcher(FileWatcher *watcher, MemoryArena arena, string wildcard_extension) {
+         watcher->arena = arena;
+         watcher->wildcard_extension = PushCopy(&watcher->arena, wildcard_extension);
+      }
+      
+      void InitFileWatcher(FileWatcher *watcher, MemoryArena arena, char *wildcard_extension) {
+         InitFileWatcher(watcher, arena, Literal(wildcard_extension));
+      }
+
+      //NOTE: updates file watcher, returns true if file timestamps have changed
+      bool CheckFiles(FileWatcher *watcher) {
+         MemoryArena *arena = &watcher->arena;
+
+         for(FileWatcherLink *curr = watcher->first_in_list;
+             curr; curr = curr->next_in_list)
+         {
+            curr->found = false;
+         }
+
+         bool changed = false;
+         for(FileListLink *file = ListFilesWithExtension(ToCString(watcher->wildcard_extension)); 
+             file; file = file->next)
+         {
+            FileWatcherLink *link = NULL;
+            u32 hash = Hash(file->full_name) % ArraySize(watcher->hash);
+            for(FileWatcherLink *curr = watcher->hash[hash];
+                curr; curr = curr->next_in_hash)
+            {
+               if(curr->name == file->full_name) {
+                  link = curr;
+               }
+            }
+
+            if(link == NULL) {
+               changed = true;
+               FileWatcherLink *new_link = PushStruct(arena, FileWatcherLink);
+               new_link->name = PushCopy(arena, file->full_name);
+               
+               new_link->next_in_list = watcher->first_in_list;
+               watcher->first_in_list = new_link;
+               new_link->next_in_hash = watcher->hash[hash];
+               watcher->hash[hash] = new_link;
+
+               link = new_link;
+            }
+
+            link->found = true;
+            u64 timestamp = GetFileTimestamp(file->name);
+            if(link->timestamp != timestamp) {
+               link->timestamp = timestamp;
+               changed = true;
+            }
+         }
+
+         for(FileWatcherLink *curr = watcher->first_in_list;
+             curr; curr = curr->next_in_list)
+         {
+            if(curr->found == false) {
+               changed = true;
+            }
+         }
+         
+         return changed;
+      }
+      
    #else
       #error "we dont support that platform yet"
    #endif

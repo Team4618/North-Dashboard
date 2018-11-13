@@ -140,8 +140,12 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 
    struct sockaddr_in server_info = {};
    
+   u64 timestamp_before = GetFileTimestamp("test_robot.ncrp");
+
    //NOTE: test code, writes out a bunch of test files
    WriteTestFiles();
+
+   u64 timestamp_after = GetFileTimestamp("test_robot.ncrp");
 
    LARGE_INTEGER frequency;
    QueryPerformanceFrequency(&frequency); 
@@ -247,9 +251,12 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
          DispatchMessageA(&msg);
       }
 
-      //TODO: directory change notifications
-      state.directory_changed = false;
+      state.directory_changed = CheckFiles(&state.file_watcher);
       
+      if(state.directory_changed) {
+         OutputDebugStringA("Directory Changed\n");
+      }
+
       //TODO: handle regular-TCP packets
       bool has_packets = true;
       while(has_packets) {
@@ -273,6 +280,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
             HandlePacket(&state, (PacketType::type) header.type, packet);
          }
       }
+      
 
       //TODO: handle state packets from UDP
 

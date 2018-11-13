@@ -144,6 +144,7 @@ struct DashboardState {
    FileListLink *ncff_files; //Field 
    FileListLink *ncrr_files; //Recording
    FileListLink *ncrp_files; //Robot Profile
+   FileWatcher file_watcher;
    
    f32 curr_time;
    f32 last_recieve_time;
@@ -185,15 +186,13 @@ void initDashboard(DashboardState *state) {
    state->page = DashboardPage_Home;
 
    InitRobotProfileHelper(&state->robot_profile_helper, Megabyte(10));
+   InitFileWatcher(&state->file_watcher, PlatformAllocArena(Kilobyte(512)), "*.*");
 
    state->new_field.name_box.text = state->new_field.name_buffer;
    state->new_field.name_box.size = ArraySize(state->new_field.name_buffer);
    
    state->new_field.image_file_box.text = state->new_field.image_file_buffer;
    state->new_field.image_file_box.size = ArraySize(state->new_field.image_file_buffer);
-
-   //TODO: do everytime we get a directory change notification
-   reloadFiles(state);
 }
 
 void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path, bool preview);
@@ -572,6 +571,10 @@ void DrawUI(element *root, DashboardState *state) {
    Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
    ColumnLayout(root);
    
+   if(state->directory_changed) {
+      reloadFiles(state);
+   }
+
    element *top_bar = Panel(root, RowLayout, V2(Size(root->bounds).x, 20));
    DefaultClickInteraction(top_bar);
    HoverTooltip(top_bar, state->robot.connected ? "Connected" : "Not Connected");
@@ -585,7 +588,7 @@ void DrawUI(element *root, DashboardState *state) {
    }
    Label(top_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, V2(10, 0));
    Label(top_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, V2(10, 0));
-   
+
    element *content = Panel(root, StackLayout, V2(Size(root->bounds).x, Size(root->bounds).y - 20));
    
    element *page = Panel(content, ColumnLayout, 
