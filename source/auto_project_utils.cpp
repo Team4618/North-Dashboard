@@ -206,3 +206,5 @@ AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
 
    return NULL;
 }
+
+//TODO: do reflecting and stuff in here??

@@ -13,14 +13,13 @@ struct PacketHeader {
 
 namespace PacketType {
    enum type {
-      Connect = 1,
-      Welcome = 2,
-      CurrentParameters = 3,
-      State = 4,
-      SetParameter = 5,
-      SetState = 6,
-      CurrentAutoPath = 7,
-      UploadAutonomous = 8,
+      Welcome = 1,
+      CurrentParameters = 2,
+      State = 3,
+      ParameterOp = 4,
+      SetState = 5,
+      CurrentAutoPath = 6,
+      UploadAutonomous = 7,
       //NOTE: if we change a packet just make a new type instead 
       //eg. "Welcome" becomes "Welcome_V1" & we create "Welcome_V2"
    };
@@ -147,14 +146,21 @@ struct State_PacketHeader {
 //-----------------------------------------
 
 //--------------------------------------
-//TODO: add, remove, set
+namespace ParameterOp_Type {
+   enum type {
+      SetValue = 1, //NOTE: for is_array = false
+      AddValue = 2, //NOTE: for is_array = true
+      RemoveValue = 3, //NOTE: for is_array = true
+   };
+};
 
 struct ParameterOp_PacketHeader {
+   u8 type;
    u8 subsystem_name_length;
    u8 param_name_length;
-   
-   f32 value;
-   u32 index;
+
+   f32 value; //NOTE: only used by SetValue & AddValue
+   u32 index; //NOTE: ignored if is_array = false
    
    //char [subsystem_name_length]
    //char [param_name_length]

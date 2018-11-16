@@ -190,7 +190,6 @@ struct RecorderMessageOrMarker {
 };
 
 struct RecorderCompleteList {
-   //TODO: hash to speed this up?
    RecorderMessageOrMarker *active;
    
    u32 complete_count;

@@ -16,39 +16,6 @@ string ToString(North_GameMode::type mode) {
    return EMPTY_STRING;
 }
 
-struct ConnectedSubsystem;
-struct ConnectedParameter {
-   ConnectedSubsystem *subsystem;
-
-   string name;
-   bool is_array;
-   u32 length; //ignored if is_array is false
-   union {
-      f32 value; //is_array = false
-      f32 *values; //is_array = true
-   };
-};
-
-//TODO: something like this that sends the data over the network
-void SetParamValue(ConnectedParameter *param, f32 value, u32 index) {
-   buffer packet = PushTempBuffer(Megabyte(1));
-/*
-   ParameterOp_PacketHeader packet = {};
-   packet.packet_type = PacketType::SetParameter;
-   packet.subsystem_name_length = param->subsystem->name.length;
-   packet.param_name_length = param->name.length;
-   param->value =
-   */ 
-}
-
-struct ConnectedSubsystem {
-   string name;
-   MultiLineGraphData diagnostics_graph;
-   
-   u32 param_count;
-   ConnectedParameter *params;
-};
-
 enum DashboardPage {
    DashboardPage_Home,
    DashboardPage_Subsystem,
@@ -68,14 +35,15 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
    SetUnit(data, 8 /*Volt*/, Literal("volt"));
 }
 
+#include "connected_robot.cpp"
 #include "auto_project_utils.cpp"
 #include "robot_recording.cpp"
 #include "robot_profile_helper.cpp"
 
 /**
 TODO:
--split this up into connected_robot, dashboard & dashboard_ui
--get rid of file_io
+-split this up into  dashboard & dashboard_ui
+-merge file_io into dashboard
 **/
 
 struct DashboardState {
@@ -133,7 +101,6 @@ struct DashboardState {
    ConnectedSubsystem *selected_subsystem; //NOTE: this doesnt survive a reconnect!!
    AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
    AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
-   //selected_robot_profile
    
    North_GameMode::type prev_mode;
    North_GameMode::type mode;
@@ -284,6 +251,8 @@ void DrawHome(element *page, DashboardState *state) {
 
          bool drawing_auto_preview = false;
          Label(auto_selector, "Autos", 20);
+         //TODO: dont load on file change & show all autos
+         //      load when a position is selected & check if it starts there 
          for(AutoProjectLink *auto_proj = state->first_auto_project; auto_proj; auto_proj = auto_proj->next) {
             UI_SCOPE(auto_selector->context, auto_proj);
 
