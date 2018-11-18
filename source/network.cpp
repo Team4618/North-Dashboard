@@ -1,11 +1,11 @@
 void PacketHandler_Welcome(buffer *packet, DashboardState *state) {
    //TODO: connected_robot codepath (init ConnectedSubsystem s)
-   RecieveWelcomePacket(&state->robot_profile_helper, *packet);
+   RecieveWelcomePacket(&state->current_profile, *packet);
 }
 
 void PacketHandler_CurrentParameters(buffer *packet, DashboardState *state) {
    //TODO: connected_robot codepath (update params)
-   RecieveCurrentParametersPacket(&state->robot_profile_helper, *packet);
+   RecieveCurrentParametersPacket(&state->current_profile, *packet);
 }
 
 void PacketHandler_State(buffer *packet, DashboardState *state) {
@@ -31,12 +31,12 @@ void HandlePacket(DashboardState *state, PacketType::type type, buffer packet) {
 }
 
 void HandleDisconnect(DashboardState *state) {
-   state->robot.connected = false;
-   
-   //TODO: DisconnectRobot(state->?)
+   state->connected.subsystem_count = 0;   
    state->selected_subsystem = NULL;
-   
-   NetworkTimeout(&state->robot_profile_helper);
+
+   if(state->current_profile.state == RobotProfileState::Connected) {
+      state->current_profile.state = RobotProfileState::Invalid;
+   }
 
    if(state->auto_recorder.recording)
       EndRecording(&state->auto_recorder, Literal("auto_recording"));

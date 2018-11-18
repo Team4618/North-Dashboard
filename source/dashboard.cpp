@@ -36,42 +36,31 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
 }
 
 #include "connected_robot.cpp"
+
 #include "auto_project_utils.cpp"
-#include "robot_recording.cpp"
-#include "robot_profile_helper.cpp"
+//#define INCLUDE_DRAWSETTINGS
+#include "north_settings_utils.cpp"
+#include "robot_recording_utils.cpp"
+#include "robot_profile_utils.cpp"
 
 /**
 TODO:
 -split this up into  dashboard & dashboard_ui
--merge file_io into dashboard
+-merge connected_robot in here
 **/
 
 struct DashboardState {
-   //TODO: change to connected_robot_arena & connected_robot
-   MemoryArena state_arena;
    struct {
-      bool connected;
-      string name;
-      v2 size;
-
+      MemoryArena arena;
       ConnectedSubsystem *subsystems;
       u32 subsystem_count;
-   } robot;
+   } connected;
 
-   RobotProfileHelper robot_profile_helper;
+   //TODO: live field tracking & current auto path
 
-   MemoryArena settings_arena; //TODO: this is just being used for the field_name, maybe we can get rid of it
-   u32 team_number;
-   string field_name;
-   struct {
-      bool loaded;
-      v2 size;
-      u32 flags;
-      u32 starting_position_count;
-      Field_StartingPosition starting_positions[16];
-      texture image;
-   } field;
-
+   NorthSettings settings;
+   RobotProfile current_profile;
+   
    struct {
       bool open;
       f32 width;
@@ -102,6 +91,9 @@ struct DashboardState {
    AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
    AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
    
+   RobotProfile loaded_profile; //NOTE: this is a file we're looking at
+   RobotProfile *selected_profile; //??
+
    North_GameMode::type prev_mode;
    North_GameMode::type mode;
    //--------------------------------------------------------
@@ -117,7 +109,7 @@ struct DashboardState {
 };
 
 #include "theme.cpp"
-#include "file_io.cpp"
+//#include "file_io.cpp"
 
 void reloadFiles(DashboardState *state) {
    Reset(&state->file_lists_arena);
@@ -139,20 +131,21 @@ void reloadFiles(DashboardState *state) {
       }
    }
 
-   ReadSettingsFile(state);
+   ReadSettingsFile(&state->settings);
 }
 
 void initDashboard(DashboardState *state) {
-   state->state_arena = PlatformAllocArena(Megabyte(24));
-   state->settings_arena = PlatformAllocArena(Megabyte(1));
+   state->connected.arena = PlatformAllocArena(Megabyte(24));
+   state->settings.arena = PlatformAllocArena(Megabyte(1));
    state->recording.arena = PlatformAllocArena(Megabyte(20));
    state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->auto_recorder.arena = PlatformAllocArena(Megabyte(10));
    state->manual_recorder.arena = PlatformAllocArena(Megabyte(10));
+   state->current_profile.arena = PlatformAllocArena(Megabyte(10));
+   state->loaded_profile.arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
-
-   InitRobotProfileHelper(&state->robot_profile_helper, Megabyte(10));
+   
    InitFileWatcher(&state->file_watcher, PlatformAllocArena(Kilobyte(512)), "*.*");
 
    state->new_field.name_box.text = state->new_field.name_buffer;
@@ -215,14 +208,15 @@ if(toggle_recording_button) {
 void DrawHome(element *page, DashboardState *state) {
    StackLayout(page);
 
-   if(state->field.loaded) {
+   if(state->settings.field.loaded && IsValid(&state->current_profile)) {
+      RobotProfile *profile = &state->current_profile;
       element *base = Panel(page, ColumnLayout, Size(page->bounds));
-      ui_field_topdown field = FieldTopdown(base, state->field.image, state->field.size,
+      ui_field_topdown field = FieldTopdown(base, state->settings.field.image, state->settings.field.size,
                                             Size(page->bounds).x);
 
-      v2 robot_size_px = state->robot.connected ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
-      for(u32 i = 0; i < state->field.starting_position_count; i++) {
-         Field_StartingPosition *starting_pos = state->field.starting_positions + i;
+      v2 robot_size_px =  FeetToPixels(&field, profile->size);
+      for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
+         Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
          element *field_starting_pos = _Panel(POINTER_UI_ID(starting_pos), field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
          ui_click starting_pos_click = DefaultClickInteraction(field_starting_pos);
 
@@ -240,11 +234,9 @@ void DrawHome(element *page, DashboardState *state) {
          }   
       }
 
-      if(state->robot.connected) {
-         //TODO: draw live field tracking samples
-         //TODO: draw current auto path
-      }
-
+      //TODO: draw live field tracking samples
+      //TODO: draw current auto path
+      
       if(state->home_field.starting_pos_selected) {
          element *auto_selector = VerticalList(SlidingSidePanel(page, 300, 5, 50, true));
          Background(auto_selector, V4(0.5, 0.5, 0.5, 0.5));
@@ -280,6 +272,12 @@ void DrawHome(element *page, DashboardState *state) {
          }
       }
 
+   } else {
+      if(!state->settings.field.loaded)
+         Label(page, "No Field", 50);
+      
+      if(!IsValid(&state->current_profile))
+         Label(page, "No Robot", 50);
    }
 }
 
@@ -295,8 +293,8 @@ void DrawRecordings(element *full_page, DashboardState *state) {
    Outline(page, BLACK);
 
    if(state->recording.loaded) {
-      if(state->field.loaded) {
-         ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, 
+      if(state->settings.field.loaded) {
+         ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
                                              Size(page->bounds).x);
 
          for(s32 i = 0; i < state->recording.robot_sample_count; i++) {
@@ -342,8 +340,8 @@ void DrawRobots(element *full_page, DashboardState *state) {
                                                       full_page->bounds.max - V2(60, 0)));
 
    
-   if(state->robot_profile_helper.selected_profile) {
-      RobotProfile *profile = state->robot_profile_helper.selected_profile;
+   if(state->selected_profile) {
+      RobotProfile *profile = state->selected_profile;
       Label(page, profile->name, 20);
       
       for(u32 i = 0; i < profile->subsystem_count; i++) {
@@ -382,17 +380,18 @@ void DrawRobots(element *full_page, DashboardState *state) {
    element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
    Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
 
-   if(state->robot.connected) {
-      if(Button(run_selector, menu_button, "Connected Robot").clicked) {
-
-      }
-   }
+   // if(state->robot.connected) {
+   //    if(Button(run_selector, menu_button, "Connected Robot").clicked) {
+         
+   //    }
+   // }
 
    for(FileListLink *file = state->ncrp_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
          buffer loaded_file = ReadEntireFile(Concat(file->name, Literal(".ncrp")));
          if(loaded_file.data != NULL) {
-            ParseProfileFile(&state->robot_profile_helper, loaded_file);
+            ParseProfileFile(&state->loaded_profile, loaded_file);
+            state->selected_profile = &state->loaded_profile;
          }
          FreeEntireFile(&loaded_file);
       }
@@ -408,28 +407,29 @@ void DrawSettings(element *full_page, DashboardState *state) {
    Label(page, "Settings", 50);
    
    bool settings_changed = false;
-   settings_changed |= SettingsRow(page, "Team Number: ", &state->team_number).valid_enter;
+   settings_changed |= SettingsRow(page, "Team Number: ", &state->settings.team_number).valid_enter;
    
    if(settings_changed) {
-      WriteSettingsFile(state);
+      UpdateSettingsFile(&state->settings);
    }
 
-   if(state->field.loaded) {
+   v2 robot_size_px = V2(20, 20);
+      
+   if(state->settings.field.loaded) {
       bool field_data_changed = false;
 
-      Label(page, state->field_name, 20);
+      Label(page, state->settings.field_name, 20);
       Label(page, "Field Dimensions", 20, V2(0, 0), V2(0, 5));
-      field_data_changed |= SettingsRow(page, "Field Width: ", &state->field.size.x, "ft").valid_enter;
-      field_data_changed |= SettingsRow(page, "Field Height: ", &state->field.size.y, "ft").valid_enter;
+      field_data_changed |= SettingsRow(page, "Field Width: ", &state->settings.field.size.x, "ft").valid_enter;
+      field_data_changed |= SettingsRow(page, "Field Height: ", &state->settings.field.size.y, "ft").valid_enter;
       
-      field_data_changed |= SettingsRow(page, "Field Mirrored (eg. Steamworks)", &state->field.flags, Field_Flags::MIRRORED, V2(20, 20)).clicked;
-      field_data_changed |= SettingsRow(page, "Field Symmetric (eg. Power Up)", &state->field.flags, Field_Flags::SYMMETRIC, V2(20, 20)).clicked;
+      field_data_changed |= SettingsRow(page, "Field Mirrored (eg. Steamworks)", &state->settings.field.flags, Field_Flags::MIRRORED, V2(20, 20)).clicked;
+      field_data_changed |= SettingsRow(page, "Field Symmetric (eg. Power Up)", &state->settings.field.flags, Field_Flags::SYMMETRIC, V2(20, 20)).clicked;
 
-      ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, Size(page->bounds).x);
+      ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, Size(page->bounds).x);
 
-      v2 robot_size_px = state->robot.connected ? FeetToPixels(&field, state->robot.size) : V2(20, 20);
-      for(u32 i = 0; i < state->field.starting_position_count; i++) {
-         Field_StartingPosition *starting_pos = state->field.starting_positions + i;
+      for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
+         Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
          UI_SCOPE(page->context, starting_pos);
 
          element *field_starting_pos = Panel(field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
@@ -455,10 +455,10 @@ void DrawSettings(element *full_page, DashboardState *state) {
          field_data_changed |= TextBox(starting_pos_panel, &starting_pos->angle, 20).valid_changed;
 
          if(Button(starting_pos_panel, menu_button, "Delete").clicked) {
-            for(u32 j = i; j < (state->field.starting_position_count - 1); j++) {
-               state->field.starting_positions[j] = state->field.starting_positions[j + 1];
+            for(u32 j = i; j < (state->settings.field.starting_position_count - 1); j++) {
+               state->settings.field.starting_positions[j] = state->settings.field.starting_positions[j + 1];
             }
-            state->field.starting_position_count--;
+            state->settings.field.starting_position_count--;
             field_data_changed = true;
          }
 
@@ -470,21 +470,21 @@ void DrawSettings(element *full_page, DashboardState *state) {
          field_data_changed |= (drag_pos.drag.x != 0) || (drag_pos.drag.y != 0);
       }
 
-      if((state->field.starting_position_count + 1) < ArraySize(state->field.starting_positions)) {
+      if((state->settings.field.starting_position_count + 1) < ArraySize(state->settings.field.starting_positions)) {
          element *add_starting_pos = Panel(page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
          Background(add_starting_pos, RED);
          if(DefaultClickInteraction(add_starting_pos).clicked) {
-            state->field.starting_position_count++;
-            state->field.starting_positions[state->field.starting_position_count - 1] = {};
+            state->settings.field.starting_position_count++;
+            state->settings.field.starting_positions[state->settings.field.starting_position_count - 1] = {};
             field_data_changed = true;
          }
       }
 
       if(field_data_changed) {
-         WriteFieldFile(state);
+         UpdateFieldFile(&state->settings);
       }
    } else {
-      Label(page, Concat(state->field_name, Literal(".ncff not found")), 20);
+      Label(page, Concat(state->settings.field_name, Literal(".ncff not found")), 20);
    }
 
    element *field_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 50, true));
@@ -496,9 +496,9 @@ void DrawSettings(element *full_page, DashboardState *state) {
       if(_Button(POINTER_UI_ID(file), field_selector, menu_button, file->name).clicked) {
          //TODO: this is safe because the ReadSettingsFile allocates field_name in settings_arena
          //       its pretty ugly tho so clean up
-         state->field_name = file->name;
-         WriteSettingsFile(state);
-         ReadSettingsFile(state);
+         state->settings.field_name = file->name;
+         UpdateSettingsFile(&state->settings);
+         ReadSettingsFile(&state->settings);
       }
    }
 
@@ -506,6 +506,7 @@ void DrawSettings(element *full_page, DashboardState *state) {
       element *create_game_window = Panel(field_selector, ColumnLayout, V2(Size(field_selector->bounds).x - 20, 300), V2(10, 10));
       Background(create_game_window, menu_button.colour);
 
+      //TODO: make text boxes not need the persistant struct to be handled by the user, just store it behind the scenes
       Label(create_game_window, "Create New Field File", 20);
       ui_textbox name_box = SettingsRow(create_game_window, "Name: ", &state->new_field.name_box);
       ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &state->new_field.width, "ft");
@@ -518,7 +519,10 @@ void DrawSettings(element *full_page, DashboardState *state) {
                    height_box.valid && (state->new_field.height > 0);
       
       if(Button(create_game_window, menu_button, "Create", valid).clicked) {
-         WriteNewFieldFile(state);
+         WriteNewFieldFile(GetText(state->new_field.name_box), 
+                           state->new_field.width,
+                           state->new_field.height,
+                           GetText(state->new_field.image_file_box));
          state->new_field.open = false;
       }
 
@@ -546,14 +550,15 @@ void DrawUI(element *root, DashboardState *state) {
 
    element *top_bar = Panel(root, RowLayout, V2(Size(root->bounds).x, 20));
    DefaultClickInteraction(top_bar);
-   HoverTooltip(top_bar, state->robot.connected ? "Connected" : "Not Connected");
    
    Background(top_bar, V4(0.5, 0.5, 0.5, 1));
-   if(state->robot.connected) {
-      Label(top_bar, state->robot.name, 20, V2(10, 0));
+   if(state->current_profile.state == RobotProfileState::Connected) {
+      Label(top_bar, state->current_profile.name, 20, V2(10, 0));
       Label(top_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, V2(10, 0));
+   } else if(state->current_profile.state == RobotProfileState::Loaded) {
+      Label(top_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, V2(10, 0));
    } else {
-      Label(top_bar, "No Connection", 20, V2(5, 0));
+      Label(top_bar, "No Robot", 20, V2(5, 0));
    }
    Label(top_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, V2(10, 0));
    Label(top_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, V2(10, 0));
@@ -577,12 +582,12 @@ void DrawUI(element *root, DashboardState *state) {
       state->page = DashboardPage_Home;
    }
 
-   if(state->robot.connected) {
+   if(state->connected.subsystem_count > 0) {
       element *divider1 = Panel(menu_bar, NULL, V2(Size(menu_bar->bounds).x - 40, 5), V2(10, 0));
       Background(divider1, BLACK);
 
-      for(u32 i = 0; i < state->robot.subsystem_count; i++) {
-         ConnectedSubsystem *subsystem = state->robot.subsystems + i; 
+      for(u32 i = 0; i < state->connected.subsystem_count; i++) {
+         ConnectedSubsystem *subsystem = state->connected.subsystems + i; 
          button_style style = menu_button;
          style.colour = V4(0.55, 0, 0, 0.5);
          if(_Button(POINTER_UI_ID(i), menu_bar, style, subsystem->name).clicked) {

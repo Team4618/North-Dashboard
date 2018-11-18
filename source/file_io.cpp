@@ -1,54 +1,5 @@
-void ReadSettingsFile(DashboardState *state) {
-   Reset(&state->settings_arena);
 
-   buffer settings_file = ReadEntireFile("settings.ncsf");
-   if(settings_file.data != NULL) {
-      FileHeader *file_numbers = ConsumeStruct(&settings_file, FileHeader);
-      
-      if((file_numbers->magic_number == SETTINGS_MAGIC_NUMBER) && 
-         (file_numbers->version_number == SETTINGS_CURR_VERSION))
-      {
-         Settings_FileHeader *header = ConsumeStruct(&settings_file, Settings_FileHeader);
-         
-         state->team_number = header->team_number;
-         state->field_name = PushCopy(&state->settings_arena, ConsumeString(&settings_file, header->field_name_length));
-      }
-
-      FreeEntireFile(&settings_file);
-   }
-
-   buffer field_file = ReadEntireFile(Concat(state->field_name, Literal(".ncff")));
-   state->field.loaded = (field_file.data != NULL);
-   if(field_file.data != NULL) {
-      FileHeader *file_numbers = ConsumeStruct(&field_file, FileHeader);
-
-      if((file_numbers->magic_number == FIELD_MAGIC_NUMBER) && 
-         (file_numbers->version_number == FIELD_CURR_VERSION))
-      {
-         Field_FileHeader *header = ConsumeStruct(&field_file, Field_FileHeader);
-         state->field.size = V2(header->width, header->height);
-         state->field.flags = header->flags;
-
-         u32 starting_positions_size = sizeof(Field_StartingPosition) * header->starting_position_count;
-         Field_StartingPosition *starting_positions = ConsumeArray(&field_file, Field_StartingPosition,
-                                                                   header->starting_position_count);
-         
-         //TODO: make some sort of error message instead?
-         Assert(header->starting_position_count <= ArraySize(state->field.starting_positions));
-         
-         state->field.starting_position_count = header->starting_position_count;
-         Copy(starting_positions, starting_positions_size, state->field.starting_positions);
-         
-         deleteTexture(state->field.image);
-         u32 *image_texels = (u32 *) ConsumeSize(&field_file, header->image_width * header->image_height * sizeof(u32));
-         state->field.image = createTexture(image_texels, header->image_width, header->image_height);
-      }
-
-      FreeEntireFile(&field_file);
-   }
-}
-
-void WriteFieldFile(DashboardState *state) {
+void UpdateFieldFile(DashboardState *state) {
    image img = {};
    {
       buffer old_field_file = ReadEntireFile(Concat(state->field_name, Literal(".ncff")));
@@ -80,27 +31,6 @@ void WriteFieldFile(DashboardState *state) {
    
    WriteEntireFile(Concat(state->field_name, Literal(".ncff")), field_file);
    OutputDebugStringA("field saved\n");
-}
-
-void WriteNewFieldFile(DashboardState *state) {
-   FileHeader numbers = header(FIELD_MAGIC_NUMBER, FIELD_CURR_VERSION);
-   Field_FileHeader header = {};
-   header.width = state->new_field.width;
-   header.height = state->new_field.height;
-   image img = ReadImage(GetText(state->new_field.image_file_box));
-   header.image_width = img.valid ? img.width : 0;
-   header.image_height = img.valid ? img.height : 0;
-
-   u32 image_size = img.width * img.height * 4;
-
-   buffer field_file = PushTempBuffer(sizeof(numbers) + sizeof(header) + image_size);
-   WriteStruct(&field_file, &numbers);
-   WriteStruct(&field_file, &header);
-   if(img.valid)
-      WriteSize(&field_file, img.texels, image_size);
-   
-   WriteEntireFile(Concat(GetText(state->new_field.name_box), Literal(".ncff")), field_file);
-   OutputDebugStringA("new field written\n");
 }
 
 void WriteSettingsFile(DashboardState *state) {
