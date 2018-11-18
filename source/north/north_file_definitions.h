@@ -153,6 +153,8 @@ struct RobotRecording_FileHeader {
 #define ROBOT_RECORDING_CURR_VERSION 0
    u64 timestamp;
    u8 robot_name_length;
+   f32 robot_width;
+   f32 robot_length;
    u8 subsystem_count;
    u32 robot_state_sample_count;
    u32 message_count;

@@ -35,19 +35,102 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
    SetUnit(data, 8 /*Volt*/, Literal("volt"));
 }
 
-#include "connected_robot.cpp"
-
 #include "auto_project_utils.cpp"
 //#define INCLUDE_DRAWSETTINGS
 #include "north_settings_utils.cpp"
 #include "robot_recording_utils.cpp"
 #include "robot_profile_utils.cpp"
 
-/**
-TODO:
--split this up into  dashboard & dashboard_ui
--merge connected_robot in here
-**/
+struct ConnectedParameter;
+struct ConnectedParameterValue {
+   ConnectedParameter *parent;
+   ConnectedParameterValue *next;
+   ConnectedParameterValue *prev;
+   
+   u32 index;
+   f32 value;
+};
+
+struct ConnectedSubsystem;
+struct ConnectedParameter {
+   ConnectedSubsystem *subsystem;
+   string name;
+   bool is_array;
+
+   ConnectedParameterValue sentinel;
+};
+
+struct ConnectedSubsystem {
+   //TODO: we're being super infefficient with memory right now, fix eventually
+   MemoryArena param_arena;
+
+   string name;
+   MultiLineGraphData diagnostics_graph;
+   
+   u32 param_count;
+   ConnectedParameter *params;
+};
+
+void SetParamValue(ConnectedParameterValue *param, f32 value) {
+   buffer packet = PushTempBuffer(Megabyte(1));
+
+   ParameterOp_PacketHeader header = {};
+   header.type = ParameterOp_Type::SetValue;
+   header.subsystem_name_length = param->parent->subsystem->name.length;
+   header.param_name_length = param->parent->name.length;
+
+   header.index = param->index;
+   header.value = value;
+   param->value = value; 
+}
+
+void RecalculateIndicies(ConnectedParameter *param) {
+   u32 i = 0;
+   for(ConnectedParameterValue *curr = param->sentinel.next;
+       curr != &param->sentinel; curr = curr->next)
+   {
+      curr->index = i++;
+   }
+}
+
+void AddParamValue(ConnectedParameter *param) {
+   Assert(param->is_array);
+   MemoryArena *arena = &param->subsystem->param_arena;
+   ConnectedParameterValue *sentinel = &param->sentinel;
+
+   ConnectedParameterValue *new_value = PushStruct(arena, ConnectedParameterValue);
+   new_value->value = 0;
+   new_value->parent = param;
+   new_value->next = sentinel;
+   new_value->prev = sentinel->prev;
+
+   new_value->next->prev = new_value;
+   new_value->prev->next = new_value; 
+   RecalculateIndicies(param);
+
+   ParameterOp_PacketHeader header = {};
+   header.type = ParameterOp_Type::AddValue;
+   header.subsystem_name_length = param->subsystem->name.length;
+   header.param_name_length = param->name.length;
+   header.index = new_value->index;
+   header.value = 0;
+}
+
+void RemoveParamValue(ConnectedParameterValue *param) {
+   Assert(param->parent->is_array);
+   ConnectedParameter *parent = param->parent;
+   
+   param->next->prev = param->prev;
+   param->prev->next = param->next;
+   RecalculateIndicies(param->parent);
+
+   ParameterOp_PacketHeader header = {};
+   header.type = ParameterOp_Type::RemoveValue;
+   header.subsystem_name_length = parent->subsystem->name.length;
+   header.param_name_length = parent->name.length;
+   header.index = param->index;
+   header.value = 0;
+}
 
 struct DashboardState {
    struct {
@@ -56,7 +139,11 @@ struct DashboardState {
       u32 subsystem_count;
    } connected;
 
-   //TODO: live field tracking & current auto path
+   RobotRecording_RobotStateSample pos_samples[1024];
+   u32 curr_pos_sample;
+   u32 pos_sample_count;
+
+   //TODO: current auto path
 
    NorthSettings settings;
    RobotProfile current_profile;
@@ -109,7 +196,6 @@ struct DashboardState {
 };
 
 #include "theme.cpp"
-//#include "file_io.cpp"
 
 void reloadFiles(DashboardState *state) {
    Reset(&state->file_lists_arena);
@@ -140,8 +226,8 @@ void initDashboard(DashboardState *state) {
    state->recording.arena = PlatformAllocArena(Megabyte(20));
    state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
-   state->auto_recorder.arena = PlatformAllocArena(Megabyte(10));
-   state->manual_recorder.arena = PlatformAllocArena(Megabyte(10));
+   state->auto_recorder.arena = PlatformAllocArena(Megabyte(30));
+   state->manual_recorder.arena = PlatformAllocArena(Megabyte(30));
    state->current_profile.arena = PlatformAllocArena(Megabyte(10));
    state->loaded_profile.arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
@@ -193,18 +279,6 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
    DrawAutoNode(state, field, path->out_node, preview);
 }
 
-/**
-TODO:
-
-if(toggle_recording_button) {
-   if(manual_recording->recording) {
-      EndRecording("name")
-   } else {
-      BeginRecording()
-   }
-}
-**/
-
 void DrawHome(element *page, DashboardState *state) {
    StackLayout(page);
 
@@ -234,7 +308,10 @@ void DrawHome(element *page, DashboardState *state) {
          }   
       }
 
-      //TODO: draw live field tracking samples
+      if(state->pos_sample_count > 0) {
+         //TODO: draw live field tracking samples
+      }
+
       //TODO: draw current auto path
       
       if(state->home_field.starting_pos_selected) {
@@ -322,11 +399,25 @@ void DrawRecordings(element *full_page, DashboardState *state) {
 
    } else {
       Label(page, "No run selected", 20);
+
+      if(state->current_profile.state == RobotProfileState::Connected) {
+         if(Button(page, menu_button, Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"))).clicked) {
+            if(state->manual_recorder.recording) {
+               //TODO: actually generate a name for these
+               EndRecording(&state->manual_recorder, Literal("name"));
+            } else {
+               BeginRecording(&state->manual_recorder);
+            }
+         }
+      }
    }
    
    element *recording_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
    Background(recording_selector, V4(0.5, 0.5, 0.5, 0.5));
-   
+   if(DefaultClickInteraction(recording_selector).clicked) {
+      state->recording.loaded = false;
+   }
+
    for(FileListLink *file = state->ncrr_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), recording_selector, menu_button, file->name).clicked) {
          LoadRecording(&state->recording, file->name);
@@ -344,6 +435,10 @@ void DrawRobots(element *full_page, DashboardState *state) {
       RobotProfile *profile = state->selected_profile;
       Label(page, profile->name, 20);
       
+      if(Button(page, menu_button, "Load").clicked) {
+         LoadProfileFile(&state->current_profile, profile->name);
+      }
+
       for(u32 i = 0; i < profile->subsystem_count; i++) {
          RobotProfileSubsystem *subsystem = profile->subsystems + i;
          element *subsystem_page = Panel(page, ColumnLayout, V2(Size(page).x - 60, 400), V2(20, 0));
@@ -380,20 +475,27 @@ void DrawRobots(element *full_page, DashboardState *state) {
    element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
    Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
 
-   // if(state->robot.connected) {
-   //    if(Button(run_selector, menu_button, "Connected Robot").clicked) {
-         
-   //    }
-   // }
+   if(state->current_profile.state == RobotProfileState::Connected) {
+      if(Button(run_selector, menu_button, "Connected Robot").clicked) {
+         state->selected_profile = &state->current_profile;
+      }
+
+      element *divider = Panel(run_selector, NULL, V2(Size(run_selector->bounds).x - 40, 5), V2(10, 0));
+      Background(divider, BLACK);
+   }
 
    for(FileListLink *file = state->ncrp_files; file; file = file->next) {
+      if((state->current_profile.state == RobotProfileState::Connected) && 
+         (state->current_profile.name == file->name))
+      {
+         continue;
+      }
+      
       if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
-         buffer loaded_file = ReadEntireFile(Concat(file->name, Literal(".ncrp")));
-         if(loaded_file.data != NULL) {
-            ParseProfileFile(&state->loaded_profile, loaded_file);
+         LoadProfileFile(&state->loaded_profile, file->name);
+
+         if(IsValid(&state->loaded_profile))
             state->selected_profile = &state->loaded_profile;
-         }
-         FreeEntireFile(&loaded_file);
       }
    }
 }
@@ -612,7 +714,6 @@ void DrawUI(element *root, DashboardState *state) {
       state->page = DashboardPage_Settings;
    }
 
-   //TODO: end recordings when we disconnect
    //TODO: move recordings to their own thread
 
    if((state->mode == North_GameMode::Autonomous) && 

@@ -5,6 +5,8 @@ void WriteTestFiles() {
       FileHeader numbers = header(ROBOT_RECORDING_MAGIC_NUMBER, ROBOT_RECORDING_CURR_VERSION);
       RobotRecording_FileHeader header = {};
       header.robot_name_length = 4;
+      header.robot_width = 2;
+      header.robot_length = 2;
       header.subsystem_count = 2;
       header.robot_state_sample_count = 20;
 
@@ -135,10 +137,10 @@ void WriteTestFiles() {
 
       FileHeader numbers = header(ROBOT_PROFILE_MAGIC_NUMBER, ROBOT_PROFILE_CURR_VERSION);
       RobotProfile_FileHeader header = {};
-      char robot_name[] = "test_bot";
+      char robot_name[] = "test_robot";
       header.robot_name_length = ArraySize(robot_name) - 1;
-      header.robot_width = 28;
-      header.robot_length = 28;
+      header.robot_width = 28/12;
+      header.robot_length = 28/12;
       header.subsystem_count = 1;
       WriteStruct(&test_robot, &numbers);
       WriteStruct(&test_robot, &header);

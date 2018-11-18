@@ -143,7 +143,7 @@ void LoadRecording(LoadedRobotRecording *state, string file_name) {
 
 struct RobotStateSampleBlock {
    RobotStateSampleBlock *next;
-   RobotRecording_RobotStateSample samples[256];
+   RobotRecording_RobotStateSample samples[1024];
    u32 count;
 };
 

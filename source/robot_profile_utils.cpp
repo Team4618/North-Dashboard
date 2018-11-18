@@ -270,3 +270,11 @@ void ParseProfileFile(RobotProfile *profile, buffer file) {
       }
    }
 }
+
+void LoadProfileFile(RobotProfile *profile, string file_name) {
+   buffer loaded_file = ReadEntireFile(Concat(file_name, Literal(".ncrp")));
+   if(loaded_file.data != NULL) 
+      ParseProfileFile(profile, loaded_file);
+   
+   FreeEntireFile(&loaded_file);
+}

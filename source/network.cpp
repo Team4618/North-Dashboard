@@ -32,10 +32,15 @@ void HandlePacket(DashboardState *state, PacketType::type type, buffer packet) {
 
 void HandleDisconnect(DashboardState *state) {
    state->connected.subsystem_count = 0;   
+   state->pos_sample_count = 0;
    state->selected_subsystem = NULL;
 
    if(state->current_profile.state == RobotProfileState::Connected) {
-      state->current_profile.state = RobotProfileState::Invalid;
+      LoadProfileFile(&state->current_profile, state->current_profile.name);
+   }
+
+   if(state->selected_profile == &state->current_profile) {
+      state->selected_profile = NULL;
    }
 
    if(state->auto_recorder.recording)
