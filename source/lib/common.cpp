@@ -278,6 +278,7 @@ void WriteString(buffer *b, string str) {
 
 #define WriteStructData(b, type, name, code) do { type name = {}; code WriteStruct(b, &name); } while(false)
 
+//TODO: make the temp memory stuff a bit more advanced, eg. scope local temp arenas
 MemoryArena __temp_arena;
 
 #define PushTempSize(size) PushSize(&__temp_arena, (size))

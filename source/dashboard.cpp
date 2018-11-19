@@ -35,8 +35,10 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
    SetUnit(data, 8 /*Volt*/, Literal("volt"));
 }
 
+#include "theme.cpp"
+
 #include "auto_project_utils.cpp"
-//#define INCLUDE_DRAWSETTINGS
+#define INCLUDE_DRAWSETTINGS
 #include "north_settings_utils.cpp"
 #include "robot_recording_utils.cpp"
 #include "robot_profile_utils.cpp"
@@ -194,8 +196,6 @@ struct DashboardState {
    
    f32 curr_time;
 };
-
-#include "theme.cpp"
 
 void reloadFiles(DashboardState *state) {
    Reset(&state->file_lists_arena);
@@ -500,148 +500,6 @@ void DrawRobots(element *full_page, DashboardState *state) {
    }
 }
 
-//TODO: do we want to save settings & field data every time a change is made or have a "save" button?
-void DrawSettings(element *full_page, DashboardState *state) {
-   StackLayout(full_page);
-   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
-                                                      full_page->bounds.max - V2(60, 0)));
-   
-   Label(page, "Settings", 50);
-   
-   bool settings_changed = false;
-   settings_changed |= SettingsRow(page, "Team Number: ", &state->settings.team_number).valid_enter;
-   
-   if(settings_changed) {
-      UpdateSettingsFile(&state->settings);
-   }
-
-   v2 robot_size_px = V2(20, 20);
-      
-   if(state->settings.field.loaded) {
-      bool field_data_changed = false;
-
-      Label(page, state->settings.field_name, 20);
-      Label(page, "Field Dimensions", 20, V2(0, 0), V2(0, 5));
-      field_data_changed |= SettingsRow(page, "Field Width: ", &state->settings.field.size.x, "ft").valid_enter;
-      field_data_changed |= SettingsRow(page, "Field Height: ", &state->settings.field.size.y, "ft").valid_enter;
-      
-      field_data_changed |= SettingsRow(page, "Field Mirrored (eg. Steamworks)", &state->settings.field.flags, Field_Flags::MIRRORED, V2(20, 20)).clicked;
-      field_data_changed |= SettingsRow(page, "Field Symmetric (eg. Power Up)", &state->settings.field.flags, Field_Flags::SYMMETRIC, V2(20, 20)).clicked;
-
-      ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, Size(page->bounds).x);
-
-      for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
-         Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
-         UI_SCOPE(page->context, starting_pos);
-
-         element *field_starting_pos = Panel(field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
-         v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
-                                 -sinf(starting_pos->angle * (PI32 / 180)));
-         Background(field_starting_pos, RED);
-         Line(field_starting_pos, Center(field_starting_pos->bounds),
-                                  Center(field_starting_pos->bounds) + 10 * direction_arrow,
-                                  BLACK);
-         ui_drag drag_pos = DefaultDragInteraction(field_starting_pos);
-
-         starting_pos->pos = ClampTo(starting_pos->pos + PixelsToFeet(&field, drag_pos.drag), 
-                                     RectCenterSize(V2(0, 0), field.size_in_ft));
-         
-         element *starting_pos_panel = Panel(page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
-         Background(starting_pos_panel, BLUE); 
-
-         Label(starting_pos_panel, "X: ", 20);
-         field_data_changed |= TextBox(starting_pos_panel, &starting_pos->pos.x, 20).valid_changed;
-         Label(starting_pos_panel, "Y: ", 20);
-         field_data_changed |= TextBox(starting_pos_panel, &starting_pos->pos.y, 20).valid_changed;
-         Label(starting_pos_panel, "Angle: ", 20);
-         field_data_changed |= TextBox(starting_pos_panel, &starting_pos->angle, 20).valid_changed;
-
-         if(Button(starting_pos_panel, menu_button, "Delete").clicked) {
-            for(u32 j = i; j < (state->settings.field.starting_position_count - 1); j++) {
-               state->settings.field.starting_positions[j] = state->settings.field.starting_positions[j + 1];
-            }
-            state->settings.field.starting_position_count--;
-            field_data_changed = true;
-         }
-
-         if(IsHot(field_starting_pos) || ContainsCursor(starting_pos_panel)) {
-            Outline(field_starting_pos, BLACK);
-            Outline(starting_pos_panel, BLACK);
-         }
-
-         field_data_changed |= (drag_pos.drag.x != 0) || (drag_pos.drag.y != 0);
-      }
-
-      if((state->settings.field.starting_position_count + 1) < ArraySize(state->settings.field.starting_positions)) {
-         element *add_starting_pos = Panel(page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
-         Background(add_starting_pos, RED);
-         if(DefaultClickInteraction(add_starting_pos).clicked) {
-            state->settings.field.starting_position_count++;
-            state->settings.field.starting_positions[state->settings.field.starting_position_count - 1] = {};
-            field_data_changed = true;
-         }
-      }
-
-      if(field_data_changed) {
-         UpdateFieldFile(&state->settings);
-      }
-   } else {
-      Label(page, Concat(state->settings.field_name, Literal(".ncff not found")), 20);
-   }
-
-   element *field_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 50, true));
-   Background(field_selector, V4(0.5, 0.5, 0.5, 0.5));
-   
-   Label(field_selector, "Fields", 50); //TODO: center this
-   
-   for(FileListLink *file = state->ncff_files; file; file = file->next) {
-      if(_Button(POINTER_UI_ID(file), field_selector, menu_button, file->name).clicked) {
-         //TODO: this is safe because the ReadSettingsFile allocates field_name in settings_arena
-         //       its pretty ugly tho so clean up
-         state->settings.field_name = file->name;
-         UpdateSettingsFile(&state->settings);
-         ReadSettingsFile(&state->settings);
-      }
-   }
-
-   if(state->new_field.open) {
-      element *create_game_window = Panel(field_selector, ColumnLayout, V2(Size(field_selector->bounds).x - 20, 300), V2(10, 10));
-      Background(create_game_window, menu_button.colour);
-
-      //TODO: make text boxes not need the persistant struct to be handled by the user, just store it behind the scenes
-      Label(create_game_window, "Create New Field File", 20);
-      ui_textbox name_box = SettingsRow(create_game_window, "Name: ", &state->new_field.name_box);
-      ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &state->new_field.width, "ft");
-      ui_numberbox height_box = SettingsRow(create_game_window, "Height: ", &state->new_field.height, "ft");
-      ui_textbox image_file_box = SettingsRow(create_game_window, "Image: ", &state->new_field.image_file_box);
-
-      bool valid = (GetText(state->new_field.name_box).length > 0) &&
-                   (GetText(state->new_field.image_file_box).length > 0) &&
-                   width_box.valid && (state->new_field.width > 0) &&
-                   height_box.valid && (state->new_field.height > 0);
-      
-      if(Button(create_game_window, menu_button, "Create", valid).clicked) {
-         WriteNewFieldFile(GetText(state->new_field.name_box), 
-                           state->new_field.width,
-                           state->new_field.height,
-                           GetText(state->new_field.image_file_box));
-         state->new_field.open = false;
-      }
-
-      if(Button(create_game_window, menu_button, "Exit").clicked) {
-         state->new_field.width = 0;
-         state->new_field.height = 0;
-         state->new_field.name_box.used = 0;
-         state->new_field.image_file_box.used = 0;
-         state->new_field.open = false;
-      }
-   } else {
-      if(Button(field_selector, menu_button, "Create Field").clicked) {
-         state->new_field.open = true;
-      }
-   }
-}
-
 void DrawUI(element *root, DashboardState *state) {
    Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
    ColumnLayout(root);
@@ -674,7 +532,11 @@ void DrawUI(element *root, DashboardState *state) {
       case DashboardPage_Subsystem: DrawSubsystem(page, state->selected_subsystem); break;
       case DashboardPage_Recordings: DrawRecordings(page, state); break;
       case DashboardPage_Robots: DrawRobots(page, state); break;
-      case DashboardPage_Settings: DrawSettings(page, state); break;
+      case DashboardPage_Settings: {
+         v2 robot_size_ft = V2(2, 2);
+         string robot_size_label = Literal("No robot loaded, defaulting to 2x2ft");
+         DrawSettings(page, &state->settings, robot_size_ft, robot_size_label, state->ncff_files);
+      } break;
    }
 
    element *menu_bar = VerticalList(SlidingSidePanel(content, 300, 5, 50, false));

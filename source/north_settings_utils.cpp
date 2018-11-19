@@ -135,8 +135,18 @@ void WriteNewFieldFile(string name, f32 width, f32 height, string img_file_name)
 }
 
 #ifdef INCLUDE_DRAWSETTINGS
+
+namespace new_field_ui {
+   bool open = false;
+   f32 width = 0;
+   f32 height = 0;
+}
+
 //TODO: do we want to save settings & field data every time a change is made or have a "save" button?
-void DrawSettings(element *full_page, NorthSettings *state, v2 robot_size_px) {
+void DrawSettings(element *full_page, NorthSettings *state, 
+                  v2 robot_size_ft, string robot_size_label,
+                  FileListLink *ncff_files)
+{
    StackLayout(full_page);
    element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
                                                       full_page->bounds.max - V2(60, 0)));
@@ -147,7 +157,7 @@ void DrawSettings(element *full_page, NorthSettings *state, v2 robot_size_px) {
    settings_changed |= SettingsRow(page, "Team Number: ", &state->team_number).valid_enter;
    
    if(settings_changed) {
-      //WriteSettingsFile(state);
+      UpdateSettingsFile(state);
    }
 
    if(state->field.loaded) {
@@ -155,16 +165,18 @@ void DrawSettings(element *full_page, NorthSettings *state, v2 robot_size_px) {
 
       Label(page, state->field_name, 20);
       Label(page, "Field Dimensions", 20, V2(0, 0), V2(0, 5));
-      field_data_changed |= SettingsRow(page, "Field Width: ", &state->settings.field.size.x, "ft").valid_enter;
-      field_data_changed |= SettingsRow(page, "Field Height: ", &state->settings.field.size.y, "ft").valid_enter;
+      field_data_changed |= SettingsRow(page, "Field Width: ", &state->field.size.x, "ft").valid_enter;
+      field_data_changed |= SettingsRow(page, "Field Height: ", &state->field.size.y, "ft").valid_enter;
       
-      field_data_changed |= SettingsRow(page, "Field Mirrored (eg. Steamworks)", &state->settings.field.flags, Field_Flags::MIRRORED, V2(20, 20)).clicked;
-      field_data_changed |= SettingsRow(page, "Field Symmetric (eg. Power Up)", &state->settings.field.flags, Field_Flags::SYMMETRIC, V2(20, 20)).clicked;
+      field_data_changed |= SettingsRow(page, "Field Mirrored (eg. Steamworks)", &state->field.flags, Field_Flags::MIRRORED, V2(20, 20)).clicked;
+      field_data_changed |= SettingsRow(page, "Field Symmetric (eg. Power Up)", &state->field.flags, Field_Flags::SYMMETRIC, V2(20, 20)).clicked;
 
-      ui_field_topdown field = FieldTopdown(page, state->field.image, state->settings.field.size, Size(page->bounds).x);
+      ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, Size(page->bounds).x);
+      Label(page, robot_size_label, 20);
 
+      v2 robot_size_px =  FeetToPixels(&field, robot_size_ft);
       for(u32 i = 0; i < state->field.starting_position_count; i++) {
-         Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
+         Field_StartingPosition *starting_pos = state->field.starting_positions + i;
          UI_SCOPE(page->context, starting_pos);
 
          element *field_starting_pos = Panel(field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
@@ -190,10 +202,10 @@ void DrawSettings(element *full_page, NorthSettings *state, v2 robot_size_px) {
          field_data_changed |= TextBox(starting_pos_panel, &starting_pos->angle, 20).valid_changed;
 
          if(Button(starting_pos_panel, menu_button, "Delete").clicked) {
-            for(u32 j = i; j < (state->settings.field.starting_position_count - 1); j++) {
-               state->settings.field.starting_positions[j] = state->settings.field.starting_positions[j + 1];
+            for(u32 j = i; j < (state->field.starting_position_count - 1); j++) {
+               state->field.starting_positions[j] = state->field.starting_positions[j + 1];
             }
-            state->settings.field.starting_position_count--;
+            state->field.starting_position_count--;
             field_data_changed = true;
          }
 
@@ -205,21 +217,21 @@ void DrawSettings(element *full_page, NorthSettings *state, v2 robot_size_px) {
          field_data_changed |= (drag_pos.drag.x != 0) || (drag_pos.drag.y != 0);
       }
 
-      if((state->settings.field.starting_position_count + 1) < ArraySize(state->settings.field.starting_positions)) {
+      if((state->field.starting_position_count + 1) < ArraySize(state->field.starting_positions)) {
          element *add_starting_pos = Panel(page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
          Background(add_starting_pos, RED);
          if(DefaultClickInteraction(add_starting_pos).clicked) {
-            state->settings.field.starting_position_count++;
-            state->settings.field.starting_positions[state->settings.field.starting_position_count - 1] = {};
+            state->field.starting_position_count++;
+            state->field.starting_positions[state->field.starting_position_count - 1] = {};
             field_data_changed = true;
          }
       }
 
       if(field_data_changed) {
-         //WriteFieldFile(state);
+         UpdateFieldFile(state);
       }
    } else {
-      Label(page, Concat(state->settings.field_name, Literal(".ncff not found")), 20);
+      Label(page, Concat(state->field_name, Literal(".ncff not found")), 20);
    }
 
    element *field_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 50, true));
@@ -227,50 +239,49 @@ void DrawSettings(element *full_page, NorthSettings *state, v2 robot_size_px) {
    
    Label(field_selector, "Fields", 50); //TODO: center this
    
-   for(FileListLink *file = state->ncff_files; file; file = file->next) {
+   for(FileListLink *file = ncff_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), field_selector, menu_button, file->name).clicked) {
          //TODO: this is safe because the ReadSettingsFile allocates field_name in settings_arena
          //       its pretty ugly tho so clean up
-         state->settings.field_name = file->name;
-         //WriteSettingsFile(state);
-         ReadSettingsFile(&state->settings);
+         state->field_name = file->name;
+         UpdateSettingsFile(state);
+         ReadSettingsFile(state);
       }
    }
 
-   if(state->new_field.open) {
+   if(new_field_ui::open) {
       element *create_game_window = Panel(field_selector, ColumnLayout, V2(Size(field_selector->bounds).x - 20, 300), V2(10, 10));
       Background(create_game_window, menu_button.colour);
 
-      //TODO: make text boxes not need the persistant struct to be handled by the user, just store it behind the scenes
       Label(create_game_window, "Create New Field File", 20);
-      ui_textbox name_box = SettingsRow(create_game_window, "Name: ", &state->new_field.name_box);
-      ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &state->new_field.width, "ft");
-      ui_numberbox height_box = SettingsRow(create_game_window, "Height: ", &state->new_field.height, "ft");
-      ui_textbox image_file_box = SettingsRow(create_game_window, "Image: ", &state->new_field.image_file_box);
+      ui_textbox name_box = SettingsRow(create_game_window, "Name: ", AllocateTextbox(page->context, 15));
+      ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &new_field_ui::width, "ft");
+      ui_numberbox height_box = SettingsRow(create_game_window, "Height: ", &new_field_ui::height, "ft");
+      ui_textbox image_file_box = SettingsRow(create_game_window, "Image: ", AllocateTextbox(page->context, 15));
 
-      bool valid = (GetText(state->new_field.name_box).length > 0) &&
-                   (GetText(state->new_field.image_file_box).length > 0) &&
-                   width_box.valid && (state->new_field.width > 0) &&
-                   height_box.valid && (state->new_field.height > 0);
+      bool valid = (GetText(name_box).length > 0) &&
+                   (GetText(image_file_box).length > 0) &&
+                   width_box.valid && (new_field_ui::width > 0) &&
+                   height_box.valid && (new_field_ui::height > 0);
       
       if(Button(create_game_window, menu_button, "Create", valid).clicked) {
-         WriteNewFieldFile(GetText(state->new_field.name_box), 
-                           state->new_field.width,
-                           state->new_field.height,
-                           GetText(state->new_field.image_file_box));
-         state->new_field.open = false;
+         WriteNewFieldFile(GetText(name_box), 
+                           new_field_ui::width,
+                           new_field_ui::height,
+                           GetText(image_file_box));
+         new_field_ui::open = false;
       }
 
       if(Button(create_game_window, menu_button, "Exit").clicked) {
-         state->new_field.width = 0;
-         state->new_field.height = 0;
-         state->new_field.name_box.used = 0;
-         state->new_field.image_file_box.used = 0;
-         state->new_field.open = false;
+         new_field_ui::width = 0;
+         new_field_ui::height = 0;
+         Clear(name_box);
+         Clear(image_file_box);
+         new_field_ui::open = false;
       }
    } else {
       if(Button(field_selector, menu_button, "Create Field").clicked) {
-         state->new_field.open = true;
+         new_field_ui::open = true;
       }
    }
 }

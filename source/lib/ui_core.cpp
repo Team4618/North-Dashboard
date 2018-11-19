@@ -744,6 +744,8 @@ u8 *_GetOrAllocate(ui_id in_id, UIContext *context, u32 size) {
    return result;
 }
 
+#define UIPersistentData(ctx, type) (type *) _GetOrAllocate(GEN_UI_ID, ctx, sizeof(type))
+
 //Basic animations-------------------------------------------------
 struct ui_slide_animation {
    bool init;
