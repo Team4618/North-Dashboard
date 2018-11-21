@@ -78,22 +78,7 @@ ui_textbox _TextBox(ui_id id, element *parent, TextBoxData *data, f32 line_heigh
    return result;
 }
 
-//TODO: im not a fan of this honestly, its kinda slow & bulky and doesnt play nice with the ui_id system
-struct textbox_persistent_data {
-   bool init;
-   TextBoxData data;
-};
-
-#define AllocateTextbox(...) _AllocateTextbox(GEN_UI_ID, __VA_ARGS__)
-TextBoxData *_AllocateTextbox(ui_id id, UIContext *context, u32 char_count) {
-   textbox_persistent_data *data = (textbox_persistent_data *) _GetOrAllocate(id, context, sizeof(textbox_persistent_data));
-   if(!data->init) {
-      data->init = true;
-      data->data.text = PushArray(&context->persistent_arena, char, char_count);
-      data->data.size = char_count;
-   }
-   return &data->data;
-}
+#define StaticTextBoxData(name, char_count) static TextBoxData name = {}; do{ static char __buffer[char_count] = {}; name.text = __buffer; name.size = ArraySize(__buffer); }while(false) 
 
 string GetText(TextBoxData data) {
    return String(data.text, data.used);

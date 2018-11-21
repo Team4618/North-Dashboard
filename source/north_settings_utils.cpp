@@ -135,13 +135,6 @@ void WriteNewFieldFile(string name, f32 width, f32 height, string img_file_name)
 }
 
 #ifdef INCLUDE_DRAWSETTINGS
-
-namespace new_field_ui {
-   bool open = false;
-   f32 width = 0;
-   f32 height = 0;
-}
-
 //TODO: do we want to save settings & field data every time a change is made or have a "save" button?
 void DrawSettings(element *full_page, NorthSettings *state, 
                   v2 robot_size_ft, string robot_size_label,
@@ -249,39 +242,47 @@ void DrawSettings(element *full_page, NorthSettings *state,
       }
    }
 
-   if(new_field_ui::open) {
+   //TODO: dont know if i like using static like this, especially for the textboxes
+   //      mainly because it takes up a name, SettingsRow is pretty bad too
+   static bool new_field_open = false; 
+   static f32 new_field_width = 0;
+   static f32 new_field_height = 0;
+   StaticTextBoxData(new_field_name, 15);
+   StaticTextBoxData(new_field_image_file, 15);
+
+   if(new_field_open) {
       element *create_game_window = Panel(field_selector, ColumnLayout, V2(Size(field_selector->bounds).x - 20, 300), V2(10, 10));
       Background(create_game_window, menu_button.colour);
 
       Label(create_game_window, "Create New Field File", 20);
-      ui_textbox name_box = SettingsRow(create_game_window, "Name: ", AllocateTextbox(page->context, 15));
-      ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &new_field_ui::width, "ft");
-      ui_numberbox height_box = SettingsRow(create_game_window, "Height: ", &new_field_ui::height, "ft");
-      ui_textbox image_file_box = SettingsRow(create_game_window, "Image: ", AllocateTextbox(page->context, 15));
+      ui_textbox name_box = SettingsRow(create_game_window, "Name: ", &new_field_name);
+      ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &new_field_width, "ft");
+      ui_numberbox height_box = SettingsRow(create_game_window, "Height: ", &new_field_height, "ft");
+      ui_textbox image_file_box = SettingsRow(create_game_window, "Image: ", &new_field_image_file);
 
       bool valid = (GetText(name_box).length > 0) &&
                    (GetText(image_file_box).length > 0) &&
-                   width_box.valid && (new_field_ui::width > 0) &&
-                   height_box.valid && (new_field_ui::height > 0);
+                   width_box.valid && (new_field_width > 0) &&
+                   height_box.valid && (new_field_height > 0);
       
       if(Button(create_game_window, menu_button, "Create", valid).clicked) {
          WriteNewFieldFile(GetText(name_box), 
-                           new_field_ui::width,
-                           new_field_ui::height,
+                           new_field_width,
+                           new_field_height,
                            GetText(image_file_box));
-         new_field_ui::open = false;
+         new_field_open = false;
       }
 
       if(Button(create_game_window, menu_button, "Exit").clicked) {
-         new_field_ui::width = 0;
-         new_field_ui::height = 0;
+         new_field_width = 0;
+         new_field_height = 0;
          Clear(name_box);
          Clear(image_file_box);
-         new_field_ui::open = false;
+         new_field_open = false;
       }
    } else {
       if(Button(field_selector, menu_button, "Create Field").clicked) {
-         new_field_ui::open = true;
+         new_field_open = true;
       }
    }
 }

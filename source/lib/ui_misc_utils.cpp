@@ -37,7 +37,7 @@ ui_checkbox _SettingsRow(ui_id id, element *page, char *label, u32 *value, u32 f
 #define SlidingSidePanel(...) _SlidingSidePanel(GEN_UI_ID, __VA_ARGS__)
 element *_SlidingSidePanel(ui_id id, element *parent, f32 width, f32 height_padding, f32 tab_width, bool right) {
    UI_SCOPE(parent->context, id.a);
-   ui_slide_animation *anim = SlideAnimation(parent->context, 0, width - tab_width, 3);
+   ui_slide_animation *anim = SlideAnimation(parent->context, 0, width - tab_width, 0.5);
    v2 pos = {};
 
    if(right) {

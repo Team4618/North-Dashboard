@@ -150,18 +150,6 @@ struct DashboardState {
    NorthSettings settings;
    RobotProfile current_profile;
    
-   struct {
-      bool open;
-      f32 width;
-      f32 height;
-      
-      char name_buffer[10];
-      TextBoxData name_box;
-
-      char image_file_buffer[10];
-      TextBoxData image_file_box;
-   } new_field;
-   
    LoadedRobotRecording recording;
    RobotRecorder auto_recorder;
    RobotRecorder manual_recorder;
@@ -233,12 +221,6 @@ void initDashboard(DashboardState *state) {
    state->page = DashboardPage_Home;
    
    InitFileWatcher(&state->file_watcher, PlatformAllocArena(Kilobyte(512)), "*.*");
-
-   state->new_field.name_box.text = state->new_field.name_buffer;
-   state->new_field.name_box.size = ArraySize(state->new_field.name_buffer);
-   
-   state->new_field.image_file_box.text = state->new_field.image_file_buffer;
-   state->new_field.image_file_box.size = ArraySize(state->new_field.image_file_buffer);
 }
 
 void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path, bool preview);
@@ -501,6 +483,8 @@ void DrawRobots(element *full_page, DashboardState *state) {
 }
 
 void DrawUI(element *root, DashboardState *state) {
+   //OutputDebugStringA(ToCString(Concat(Literal("fps "), ToString(root->context->fps), Literal("\n"))));
+   
    Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
    ColumnLayout(root);
    

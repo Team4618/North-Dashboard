@@ -169,6 +169,7 @@ struct UIContext {
 
    string tooltip;   
    f64 curr_time;
+   f64 dt;
    f32 fps;
 
    ui_id scope_id;
@@ -273,6 +274,7 @@ element *beginFrame(v2 window_size, UIContext *context, f32 dt) {
    
    context->tooltip = EMPTY_STRING;
    context->curr_time += dt;
+   context->dt = dt;
    context->fps = 1.0 / dt;
 
    //TODO: defragment/garbage collect persistent hash table
@@ -764,19 +766,13 @@ ui_slide_animation *_SlideAnimation(ui_id id, UIContext *context, f32 min, f32 m
       result->min = min;
       result->value = min;
       result->max = max;
-   } else {
-      //TODO: this
-      if(min != result->min){
-
-      }
-
-      if(max != result->max) {
-
-      }
    }
+
+   Assert(result->min == min);
+   Assert(result->max == max);
    
-   //TODO: time stuff, proper animations
-   result->value = Clamp(min, max, result->value + (result->open ? 5 : -5));
+   f32 displacement = (result->open ? 1 : -1) * ((max - min) / time) * context->dt;
+   result->value = Clamp(min, max, result->value + displacement);
 
    return result;
 }

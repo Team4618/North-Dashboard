@@ -211,6 +211,8 @@ struct UploadAutonomous_DiscreteEvent {
    //f32 [parameter_count]
 };
 
+//TODO: change over to cubic hermite splines
+//TODO: events during the initial turn?
 struct UploadAutonomous_Path {
    u8 is_reverse;
    f32 accel;
