@@ -159,14 +159,13 @@ struct DashboardState {
       v2 starting_pos;
    } home_field;
 
-   MemoryArena auto_programs_arena;
-   AutoProjectLink *first_auto_project;
+   AutoProjectList auto_programs;
 
    //--------------------------------------------------------
    DashboardPage page;
    ConnectedSubsystem *selected_subsystem; //NOTE: this doesnt survive a reconnect!!
-   AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
-   AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
+   //AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
+   //AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
    
    RobotProfile loaded_profile; //NOTE: this is a file we're looking at
    RobotProfile *selected_profile; //??
@@ -190,20 +189,6 @@ void reloadFiles(DashboardState *state) {
    state->ncff_files = ListFilesWithExtension("*.ncff", &state->file_lists_arena);
    state->ncrr_files = ListFilesWithExtension("*.ncrr", &state->file_lists_arena);
    state->ncrp_files = ListFilesWithExtension("*.ncrp", &state->file_lists_arena);
-   
-   Reset(&state->auto_programs_arena);
-   state->first_auto_project = NULL;
-
-   state->selected_auto_project = NULL;
-   state->selected_auto_node = NULL;
-
-   for(FileListLink *file = ListFilesWithExtension("*.ncap"); file; file = file->next) {
-      AutoProjectLink *auto_proj = ReadAutoProject(file->name, &state->auto_programs_arena);
-      if(auto_proj) {
-         auto_proj->next = state->first_auto_project;
-         state->first_auto_project = auto_proj;
-      }
-   }
 
    ReadSettingsFile(&state->settings);
 }
@@ -212,7 +197,7 @@ void initDashboard(DashboardState *state) {
    state->connected.arena = PlatformAllocArena(Megabyte(24));
    state->settings.arena = PlatformAllocArena(Megabyte(1));
    state->recording.arena = PlatformAllocArena(Megabyte(20));
-   state->auto_programs_arena = PlatformAllocArena(Megabyte(20));
+   state->auto_programs.arena = PlatformAllocArena(Megabyte(20));
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->auto_recorder.arena = PlatformAllocArena(Megabyte(30));
    state->manual_recorder.arena = PlatformAllocArena(Megabyte(30));
@@ -232,7 +217,7 @@ void DrawAutoNode(DashboardState *state, ui_field_topdown *field, AutoNode *node
       element *node_selector = Panel(field->e, NULL, RectCenterSize(p, V2(10, 10)));
       Background(node_selector, RED);
       if(DefaultClickInteraction(node_selector).clicked) {
-         state->selected_auto_node = node;
+         //state->selected_auto_node = node;
       }
    } else {
       Rectangle(field->e, RectCenterSize(p, V2(5, 5)), RED);
@@ -247,15 +232,21 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
    if(path->control_point_count == 0) {
       Line(field->e, GetPoint(field, path->in_node->pos), GetPoint(field, path->out_node->pos), BLACK);
    } else {
+      //TODO: Not a fan of having to put this in a temp array
       u32 point_count = path->control_point_count + 2;
-      v2 *all_points = PushTempArray(v2, point_count);
+      AutonomousProgram_ControlPoint *all_points = PushTempArray(AutonomousProgram_ControlPoint, point_count);
       
-      all_points[0] = path->in_node->pos;
-      all_points[point_count - 1] = path->out_node->pos;
+      all_points[0] = { path->in_node->pos, path->in_tangent };
+      all_points[point_count - 1] = { path->out_node->pos, path->out_tangent };
       for(u32 i = 0; i < path->control_point_count; i++)
          all_points[i + 1] = path->control_points[i];
 
-      DrawBezierCurve(field, all_points, point_count);
+      for(u32 i = 0; i < point_count - 1; i++) {
+         AutonomousProgram_ControlPoint a = all_points[i];
+         AutonomousProgram_ControlPoint b = all_points[i + 1];
+         
+         DrawCubicHermite(field, a.pos, a.tangent, b.pos, b.tangent);
+      }
    }
 
    DrawAutoNode(state, field, path->out_node, preview);
@@ -286,6 +277,9 @@ void DrawHome(element *page, DashboardState *state) {
          if(starting_pos_click.clicked) {
             state->home_field.starting_pos_selected = true;
             state->home_field.starting_pos = starting_pos->pos;
+
+            ReadProjectsStartingAt(&state->auto_programs, 0, starting_pos->pos);
+
             //TODO: send starting pos to robot
          }   
       }
@@ -304,13 +298,13 @@ void DrawHome(element *page, DashboardState *state) {
          Label(auto_selector, "Autos", 20);
          //TODO: dont load on file change & show all autos
          //      load when a position is selected & check if it starts there 
-         for(AutoProjectLink *auto_proj = state->first_auto_project; auto_proj; auto_proj = auto_proj->next) {
+         for(AutoProjectLink *auto_proj = state->auto_programs.first; auto_proj; auto_proj = auto_proj->next) {
             UI_SCOPE(auto_selector->context, auto_proj);
 
             ui_button btn = Button(auto_selector, menu_button, auto_proj->name);
 
             if(btn.clicked) {
-               state->selected_auto_project = auto_proj;
+               //state->selected_auto_project = auto_proj;
             }
 
             if(IsHot(btn.e)) {
@@ -319,12 +313,12 @@ void DrawHome(element *page, DashboardState *state) {
             }
          }
 
-         if(state->selected_auto_node) {
+         if(false /*state->selected_auto_node*/) {
             //TODO: reorder path priorities
          }
 
-         if(state->selected_auto_project) {
-            DrawAutoNode(state, &field, state->selected_auto_project->starting_node, false);
+         if(false /*state->selected_auto_node*/) {
+            //DrawAutoNode(state, &field, state->selected_auto_project->starting_node, false);
             if(Button(base, menu_button, "Upload Auto").clicked) {
                //TODO: upload auto
             }

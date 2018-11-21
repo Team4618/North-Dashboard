@@ -84,3 +84,18 @@ void DrawBezierCurve(ui_field_topdown *field, v2 *in_points, u32 point_count) {
 
    DrawQuadraticBezier(field, points[i], points[i + 1], points[i + 2]);
 }
+
+v2 CubicHermite(v2 a_pos, v2 a_tan, v2 b_pos, v2 b_tan, f32 t) {
+   return (2*t*t*t - 3*t*t + 1)*a_pos + (t*t*t - 2*t*t + t)*a_tan + 
+          (-2*t*t*t + 3*t*t)*b_pos + (t*t*t - t*t)*b_tan;
+}
+
+void DrawCubicHermite(ui_field_topdown *field, v2 a_pos, v2 a_tan, v2 b_pos, v2 b_tan, v4 color = GREEN) {
+   u32 segments = 20;
+   f32 step = (f32)1 / (f32)segments;
+   for(f32 s = 0; s < segments; s++) {
+      v2 p1 = CubicHermite(a_pos, a_tan, b_pos, b_tan, s * step);
+      v2 p2 = CubicHermite(a_pos, a_tan, b_pos, b_tan, (s + 1) * step);
+      Line(field->e, GetPoint(field, p1), GetPoint(field, p2), color);
+   }
+}

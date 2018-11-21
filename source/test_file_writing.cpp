@@ -67,70 +67,55 @@ void WriteTestFiles() {
       WriteEntireFile("test_auto_run.ncrr", test_auto_run);
    }
 
-   {
-      buffer test_auto_proj = PushTempBuffer(Megabyte(1));
+   // {
+   //    buffer test_auto_proj = PushTempBuffer(Megabyte(1));
 
-      FileHeader numbers = header(AUTONOMOUS_PROGRAM_MAGIC_NUMBER, AUTONOMOUS_PROGRAM_CURR_VERSION);
-      AutonomousProgram_FileHeader header = {};
-      header.variable_count = 3;
-      WriteStruct(&test_auto_proj, &numbers);
-      WriteStruct(&test_auto_proj, &header);
+   //    FileHeader numbers = header(AUTONOMOUS_PROGRAM_MAGIC_NUMBER, AUTONOMOUS_PROGRAM_CURR_VERSION);
+   //    AutonomousProgram_FileHeader header = {};
+   //    header.variable_count = 3;
+   //    WriteStruct(&test_auto_proj, &numbers);
+   //    WriteStruct(&test_auto_proj, &header);
 
-      AutonomousProgram_Variable vmax = {3, 10};
-      char vmax_name[] = "vel";
-      WriteStruct(&test_auto_proj, &vmax);
-      WriteArray(&test_auto_proj, vmax_name, 3);
+   //    AutonomousProgram_Node start = {};
+   //    start.pos = V2(-10, -10);
+   //    start.command_count = 0;
+   //    start.path_count = 1;
+   //    WriteStruct(&test_auto_proj, &start);
 
-      AutonomousProgram_Variable accel = {5, 10};
-      char accel_name[] = "accel";
-      WriteStruct(&test_auto_proj, &accel);
-      WriteArray(&test_auto_proj, accel_name, 5);
+   //    AutonomousProgram_Path path1 = {};
+   //    path1.control_point_count = 1;
+   //    WriteStruct(&test_auto_proj, &path1);
 
-      AutonomousProgram_Variable deccel = {6, 10};
-      char deccel_name[] = "deccel";
-      WriteStruct(&test_auto_proj, &deccel);
-      WriteArray(&test_auto_proj, deccel_name, 6);
+   //    AutonomousProgram_Value accel_var = { 1 };
+   //    u8 accel_var_len = 5;
+   //    char accel_var_name[] = "accel";
+   //    WriteStruct(&test_auto_proj, &accel_var);
+   //    WriteStruct(&test_auto_proj, &accel_var_len);
+   //    WriteArray(&test_auto_proj, accel_var_name, 5);
 
-      AutonomousProgram_Node start = {};
-      start.pos = V2(-10, -10);
-      start.command_count = 0;
-      start.path_count = 1;
-      WriteStruct(&test_auto_proj, &start);
+   //    AutonomousProgram_Value deccel_var = { 1 };
+   //    u8 deccel_var_len = 6;
+   //    char deccel_var_name[] = "deccel";
+   //    WriteStruct(&test_auto_proj, &deccel_var);
+   //    WriteStruct(&test_auto_proj, &deccel_var_len);
+   //    WriteArray(&test_auto_proj, deccel_var_name, 6);
 
-      AutonomousProgram_Path path1 = {};
-      path1.control_point_count = 1;
-      WriteStruct(&test_auto_proj, &path1);
+   //    AutonomousProgram_Value max_vel_var = { 1 };
+   //    u8 max_vel_var_len = 3;
+   //    char max_vel_var_name[] = "vel";
+   //    WriteStruct(&test_auto_proj, &max_vel_var);
+   //    WriteStruct(&test_auto_proj, &max_vel_var_len);
+   //    WriteArray(&test_auto_proj, max_vel_var_name, 3);
 
-      AutonomousProgram_Value accel_var = { 1 };
-      u8 accel_var_len = 5;
-      char accel_var_name[] = "accel";
-      WriteStruct(&test_auto_proj, &accel_var);
-      WriteStruct(&test_auto_proj, &accel_var_len);
-      WriteArray(&test_auto_proj, accel_var_name, 5);
+   //    v2 control_points[] = {V2(10, 10)};
+   //    WriteArray(&test_auto_proj, control_points, ArraySize(control_points));
 
-      AutonomousProgram_Value deccel_var = { 1 };
-      u8 deccel_var_len = 6;
-      char deccel_var_name[] = "deccel";
-      WriteStruct(&test_auto_proj, &deccel_var);
-      WriteStruct(&test_auto_proj, &deccel_var_len);
-      WriteArray(&test_auto_proj, deccel_var_name, 6);
+   //    AutonomousProgram_Node end = {};
+   //    end.pos = V2(10, 2);
+   //    WriteStruct(&test_auto_proj, &end);
 
-      AutonomousProgram_Value max_vel_var = { 1 };
-      u8 max_vel_var_len = 3;
-      char max_vel_var_name[] = "vel";
-      WriteStruct(&test_auto_proj, &max_vel_var);
-      WriteStruct(&test_auto_proj, &max_vel_var_len);
-      WriteArray(&test_auto_proj, max_vel_var_name, 3);
-
-      v2 control_points[] = {V2(10, 10)};
-      WriteArray(&test_auto_proj, control_points, ArraySize(control_points));
-
-      AutonomousProgram_Node end = {};
-      end.pos = V2(10, 2);
-      WriteStruct(&test_auto_proj, &end);
-
-      WriteEntireFile("test_auto_proj.ncap", test_auto_proj);
-   }
+   //    WriteEntireFile("test_auto_proj.ncap", test_auto_proj);
+   // }
 
    {
       buffer test_robot = PushTempBuffer(Megabyte(1));

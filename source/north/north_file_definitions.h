@@ -193,29 +193,29 @@ struct AutonomousProgram_DiscreteEvent {
    //f32 [parameter_count]
 };
 
-struct AutonomousProgram_Value {
-   u8 is_variable;
-   //f32 if !is_variable
-   //struct { u8 length; char [length] } if is_variable
+struct AutonomousProgram_ControlPoint {
+   v2 pos;
+   v2 tangent;
 };
 
-//TODO: linked auto projects
 struct AutonomousProgram_Path {
+   //NOTE: begin & end points are (parent.pos, in_tangent) & (end_node.pos, out_tangent)
+   v2 in_tangent;
+   v2 out_tangent;
+
    u8 is_reverse;
 
-   //NOTE: begin & end points are parent.pos & end_node.pos
    u8 conditional_length; //NOTE: if conditional_length is 0, there is no conditional
    u8 control_point_count;
 
+   u8 velocity_datapoint_count;
    u8 continuous_event_count;
    u8 discrete_event_count;
 
-   //AutonomousProgram_Value accel
-   //AutonomousProgram_Value deccel
-   //AutonomousProgram_Value max_vel
-
    //char conditional_name [conditional_length]
-   //v2 [control_point_count]
+   //AutonomousProgram_ControlPoint [control_point_count]
+
+   //AutonomousProgram_DataPoint [velocity_datapoint_count]
    //AutonomousProgram_ContinuousEvent [continuous_event_count]
    //AutonomousProgram_DiscreteEvent [discrete_event_count]
 
@@ -239,17 +239,11 @@ struct AutonomousProgram_Node {
    //AutonomousProgram_Path [path_count]
 };
 
-struct AutonomousProgram_Variable {
-   u8 name_length;
-   f32 value;
-   //char [name_length]
-};
-
 struct AutonomousProgram_FileHeader {
 #define AUTONOMOUS_PROGRAM_MAGIC_NUMBER RIFF_CODE("NCAP") 
 #define AUTONOMOUS_PROGRAM_CURR_VERSION 0
-   u8 variable_count;
-   //AutonomousProgram_Variable [variable_count]
+   //TODO: linked auto projects
+
    //AutonomousProgram_Node begining_node
 };
 //-----------------------------------------------------------

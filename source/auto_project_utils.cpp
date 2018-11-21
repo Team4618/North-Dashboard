@@ -1,4 +1,9 @@
 //NOTE: needs common & north_file_definitions
+
+//TODO: redo this to use: 
+//    file linking
+//    starting point match & reflect
+
 struct AutoCommand {
    string subsystem_name;
    string command_name;
@@ -17,16 +22,11 @@ struct AutoNode {
    AutoPath *out_paths;
 };
 
-struct AutoContinuousEventSample {
-   f32 distance; 
-   f32 value;
-};
-
 struct AutoContinuousEvent {
    string subsystem_name;
    string command_name;
    u32 sample_count;
-   AutoContinuousEventSample *samples;
+   AutonomousProgram_DataPoint *samples;
 };
 
 struct AutoDiscreteEvent {
@@ -34,23 +34,17 @@ struct AutoDiscreteEvent {
    AutoCommand command;
 };
 
-struct AutoValue {
-   bool is_variable;
-   union {
-      f32 value;
-      string variable;
-   };
-};
-
-struct AutoPath {
+struct AutoPath {   
    AutoNode *in_node;
+   v2 in_tangent;
    AutoNode *out_node;
+   v2 out_tangent;
 
-   AutoValue accel;
-   AutoValue deccel;
-   AutoValue max_vel;
-
+   bool is_reverse;
    string conditional;
+
+   u32 velocity_datapoint_count;
+   AutonomousProgram_DataPoint *velocity_datapoints;
 
    u32 continuous_event_count;
    AutoContinuousEvent *continuous_events;
@@ -59,22 +53,19 @@ struct AutoPath {
    AutoDiscreteEvent *discrete_events;
 
    u32 control_point_count;
-   v2 *control_points;
-};
-
-struct AutoVariable {
-   string name;
-   f32 value;
+   AutonomousProgram_ControlPoint *control_points;
 };
 
 struct AutoProjectLink {
    AutoNode *starting_node;
    string name;
 
-   u32 variable_count;
-   AutoVariable *variables;
-
    AutoProjectLink *next;
+};
+
+struct AutoProjectList {
+   MemoryArena arena;
+   AutoProjectLink *first;
 };
 
 AutoCommand CreateCommand(MemoryArena *arena, string subsystem_name, string command_name,
@@ -117,25 +108,8 @@ AutoNode *ParseAutoNode(buffer *file, MemoryArena *arena) {
    return result;
 }
 
-AutoValue ParseAutoValue(buffer *file, MemoryArena *arena) {
-   AutonomousProgram_Value *file_value = ConsumeStruct(file, AutonomousProgram_Value);
-   AutoValue result = {};
-   result.is_variable = file_value->is_variable;
-   if(file_value->is_variable) {
-      u8 *variable_length = ConsumeStruct(file, u8);
-      result.variable = PushCopy(arena, ConsumeString(file, *variable_length));
-   } else {
-      result.value = *ConsumeStruct(file, f32);
-   }
-   return result;
-}
-
 void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path) {
    AutonomousProgram_Path *file_path = ConsumeStruct(file, AutonomousProgram_Path);
-
-   path->accel = ParseAutoValue(file, arena);
-   path->deccel = ParseAutoValue(file, arena);
-   path->max_vel = ParseAutoValue(file, arena);
    
    if(file_path->conditional_length == 0) {
       path->conditional = EMPTY_STRING;
@@ -144,8 +118,10 @@ void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path) {
    }
 
    path->control_point_count = file_path->control_point_count;
-   v2 *control_points = ConsumeArray(file, v2, file_path->control_point_count);
-   path->control_points = (v2 *) PushCopy(arena, control_points, file_path->control_point_count * sizeof(v2));
+   path->control_points = ConsumeAndCopyArray(arena, file, AutonomousProgram_ControlPoint, file_path->control_point_count);
+   
+   path->velocity_datapoint_count = file_path->velocity_datapoint_count;
+   path->velocity_datapoints = ConsumeAndCopyArray(arena, file, AutonomousProgram_DataPoint, file_path->velocity_datapoint_count);
 
    path->continuous_event_count = file_path->continuous_event_count;
    path->continuous_events = PushArray(arena, AutoContinuousEvent, path->continuous_event_count);
@@ -156,7 +132,7 @@ void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path) {
       event->subsystem_name = PushCopy(arena, ConsumeString(file, file_event->subsystem_name_length));
       event->command_name = PushCopy(arena, ConsumeString(file, file_event->command_name_length));
       event->sample_count = file_event->datapoint_count;
-      event->samples = PushArray(arena, AutoContinuousEventSample, event->sample_count);
+      event->samples = PushArray(arena, AutonomousProgram_DataPoint, event->sample_count);
       AutonomousProgram_DataPoint *data_points = ConsumeArray(file, AutonomousProgram_DataPoint, file_event->datapoint_count);
       for(u32 j = 0; j < event->sample_count; j++) {
          event->samples[j].distance = data_points[j].distance;
@@ -188,18 +164,8 @@ AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
       FileHeader *file_numbers = ConsumeStruct(&file, FileHeader);
       AutonomousProgram_FileHeader *header = ConsumeStruct(&file, AutonomousProgram_FileHeader);
 
-      AutoVariable *vars = PushArray(arena, AutoVariable, header->variable_count);
-      for(u32 i = 0; i < header->variable_count; i++) {
-         AutonomousProgram_Variable *file_var = ConsumeStruct(&file, AutonomousProgram_Variable);
-         AutoVariable *var = vars + i;
-         var->name = PushCopy(arena, ConsumeString(&file, file_var->name_length));
-         var->value = file_var->value;
-      }
-
       AutoProjectLink *result = PushStruct(arena, AutoProjectLink);
       result->name = PushCopy(arena, file_name);
-      result->variable_count = header->variable_count;
-      result->variables = vars;
       result->starting_node = ParseAutoNode(&file, arena);
       return result;
    }
@@ -207,4 +173,27 @@ AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
    return NULL;
 }
 
-//TODO: do reflecting and stuff in here??
+void ReadProjectsStartingAt(AutoProjectList *list, u32 field_flags, v2 pos) {
+   Reset(&list->arena);
+   list->first = NULL;
+
+   for(FileListLink *file = ListFilesWithExtension("*.ncap"); file; file = file->next) {
+      AutoProjectLink *auto_proj = ReadAutoProject(file->name, &list->arena);
+      if(auto_proj) {
+         //TODO: do reflecting and stuff in here
+         bool valid = false;
+
+         if(Length(auto_proj->starting_node->pos - pos) < 0.5) {
+            valid = true;
+         }
+
+         if(valid) {
+            auto_proj->next = list->first;
+            list->first = auto_proj;
+         }
+      }
+   }
+}
+
+//TODO: AutoProjectLink to file
+//TODO: AutoProjectLink to packet

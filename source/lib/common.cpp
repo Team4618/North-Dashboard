@@ -199,6 +199,7 @@ u8 *PushSize(MemoryArena *arena, u64 size) {
 
 #define PushStruct(arena, struct) (struct *) PushSize(arena, sizeof(struct))
 #define PushArray(arena, struct, length) (struct *) PushSize(arena, (length) * sizeof(struct))
+#define PushArrayCopy(arena, struct, first_elem, length) (struct *) PushCopy(arena, first_elem, length * sizeof(struct))
 
 string PushCopy(MemoryArena *arena, string s) {
    string result = {};
@@ -256,6 +257,8 @@ string ConsumeString(buffer *b, u32 length) {
    result.text = ConsumeArray(b, char, length);
    return result;
 }
+
+#define ConsumeAndCopyArray(arena, b, struct, length) PushArrayCopy(arena, struct, ConsumeArray(b, struct, length), length)
 
 #define PeekStruct(b, struct) (struct *) PeekSize(b, sizeof(struct))
 u8 *PeekSize(buffer *b, u64 size) {
@@ -599,16 +602,28 @@ string exe_directory = {};
 //------------------PLATFORM-SPECIFIC-STUFF---------------------
 #ifdef COMMON_PLATFORM
    #if defined(_WIN32)
+      //TODO: make stuff thread safe before we re-introduce this stuff
+
       //NOTE: on windows you need to include "windows.h" before common
-      u32 AtomicIncrement(volatile u32 *x) {
-         Assert(( (u64)x & 0x3 ) == 0);
-         return InterlockedIncrement(x);
-      }
-      #define READ_BARRIER MemoryBarrier()
-      #define WRITE_BARRIER MemoryBarrier()
+      // u32 AtomicIncrement(volatile u32 *x) {
+      //    Assert(( (u64)x & 0x3 ) == 0);
+      //    return InterlockedIncrement(x);
+      // }
+      // #define READ_BARRIER MemoryBarrier()
+      // #define WRITE_BARRIER MemoryBarrier()
+
+      //TODO: take a look at the weird memory usage
+      u64 total_size_requested = 0;
+      u64 total_size_allocated = 0;
+      u32 arenas_allocated = 0;
+      u32 arena_blocks_allocated = 0;
 
       MemoryArenaBlock *PlatformAllocArenaBlock(u64 size) {
          //OutputDebugStringA("Allocating Arena Block\n");
+         total_size_requested += size;
+         total_size_allocated += (sizeof(MemoryArenaBlock) + size);
+         arena_blocks_allocated++;
+
          MemoryArenaBlock *result = (MemoryArenaBlock *) VirtualAlloc(0, sizeof(MemoryArenaBlock) + size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
          result->size = size;
          result->used = 0;
@@ -618,12 +633,13 @@ string exe_directory = {};
       }
 
       MemoryArena PlatformAllocArena(u64 initial_size) {
+         arenas_allocated++;
+         
          MemoryArena result = {};
          result.allocator = PlatformAllocArenaBlock;
          result.first_block = PlatformAllocArenaBlock(initial_size);
          result.curr_block = result.first_block;
          result.initial_size = initial_size;
-
          return result;
       }
 
@@ -822,18 +838,18 @@ string exe_directory = {};
 #endif
 //------------------------------------------------------------------
 
-struct ticket_mutex {
-   volatile u32 ticket;
-   volatile u32 serving;
-};
+// struct ticket_mutex {
+//    volatile u32 ticket;
+//    volatile u32 serving;
+// };
 
-void BeginMutex(ticket_mutex *mutex) {
-   u32 ticket = AtomicIncrement(&mutex->ticket) - 1;
-   while(mutex->serving != ticket);
-}
+// void BeginMutex(ticket_mutex *mutex) {
+//    u32 ticket = AtomicIncrement(&mutex->ticket) - 1;
+//    while(mutex->serving != ticket);
+// }
 
-void EndMutex(ticket_mutex *mutex) {
-   AtomicIncrement(&mutex->serving);
-}
+// void EndMutex(ticket_mutex *mutex) {
+//    AtomicIncrement(&mutex->serving);
+// }
 
 //TODO: thread_pool
