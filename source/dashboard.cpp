@@ -214,9 +214,9 @@ void DrawAutoNode(DashboardState *state, ui_field_topdown *field, AutoNode *node
    
    if((node->path_count > 1) && !preview) {
       UI_SCOPE(field->e->context, node);
-      element *node_selector = Panel(field->e, NULL, RectCenterSize(p, V2(10, 10)));
+      element *node_selector = Panel(field->e, RectCenterSize(p, V2(10, 10)), Captures(INTERACTION_CLICK));
       Background(node_selector, RED);
-      if(DefaultClickInteraction(node_selector).clicked) {
+      if(WasClicked(node_selector)) {
          //state->selected_auto_node = node;
       }
    } else {
@@ -257,16 +257,17 @@ void DrawHome(element *page, DashboardState *state) {
 
    if(state->settings.field.loaded && IsValid(&state->current_profile)) {
       RobotProfile *profile = &state->current_profile;
-      element *base = Panel(page, ColumnLayout, Size(page->bounds));
+      element *base = Panel(page, Size(page->bounds), Layout(ColumnLayout));
       ui_field_topdown field = FieldTopdown(base, state->settings.field.image, state->settings.field.size,
                                             Size(page->bounds).x);
 
       v2 robot_size_px =  FeetToPixels(&field, profile->size);
       for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
          Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
-         element *field_starting_pos = _Panel(POINTER_UI_ID(starting_pos), field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
-         ui_click starting_pos_click = DefaultClickInteraction(field_starting_pos);
-
+         element *field_starting_pos = _Panel(POINTER_UI_ID(starting_pos), field.e, 
+                                              RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px),
+                                              Captures(INTERACTION_CLICK));
+         
          v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
                                  -sinf(starting_pos->angle * (PI32 / 180)));
          Background(field_starting_pos, RED);
@@ -274,7 +275,7 @@ void DrawHome(element *page, DashboardState *state) {
                                   Center(field_starting_pos->bounds) + 10 * direction_arrow,
                                   BLACK);           
 
-         if(starting_pos_click.clicked) {
+         if(WasClicked(field_starting_pos)) {
             state->home_field.starting_pos_selected = true;
             state->home_field.starting_pos = starting_pos->pos;
 
@@ -390,9 +391,10 @@ void DrawRecordings(element *full_page, DashboardState *state) {
    
    element *recording_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
    Background(recording_selector, V4(0.5, 0.5, 0.5, 0.5));
-   if(DefaultClickInteraction(recording_selector).clicked) {
-      state->recording.loaded = false;
-   }
+   //TODO: readd this
+   // if(DefaultClickInteraction(recording_selector).clicked) {
+   //    state->recording.loaded = false;
+   // }
 
    for(FileListLink *file = state->ncrr_files; file; file = file->next) {
       if(_Button(POINTER_UI_ID(file), recording_selector, menu_button, file->name).clicked) {
@@ -417,7 +419,7 @@ void DrawRobots(element *full_page, DashboardState *state) {
 
       for(u32 i = 0; i < profile->subsystem_count; i++) {
          RobotProfileSubsystem *subsystem = profile->subsystems + i;
-         element *subsystem_page = Panel(page, ColumnLayout, V2(Size(page).x - 60, 400), V2(20, 0));
+         element *subsystem_page = Panel(page, V2(Size(page).x - 60, 400), Padding(20, 0).Layout(ColumnLayout));
          Background(subsystem_page, V4(0.5, 0.5, 0.5, 0.5));
 
          Label(subsystem_page, subsystem->name, 20);
@@ -456,7 +458,7 @@ void DrawRobots(element *full_page, DashboardState *state) {
          state->selected_profile = &state->current_profile;
       }
 
-      element *divider = Panel(run_selector, NULL, V2(Size(run_selector->bounds).x - 40, 5), V2(10, 0));
+      element *divider = Panel(run_selector, V2(Size(run_selector->bounds).x - 40, 5), Padding(10, 0));
       Background(divider, BLACK);
    }
 
@@ -486,8 +488,7 @@ void DrawUI(element *root, DashboardState *state) {
       reloadFiles(state);
    }
 
-   element *top_bar = Panel(root, RowLayout, V2(Size(root->bounds).x, 20));
-   DefaultClickInteraction(top_bar);
+   element *top_bar = RowPanel(root, V2(Size(root->bounds).x, 20), Captures(INTERACTION_CLICK));
    
    Background(top_bar, V4(0.5, 0.5, 0.5, 1));
    if(state->current_profile.state == RobotProfileState::Connected) {
@@ -501,10 +502,9 @@ void DrawUI(element *root, DashboardState *state) {
    Label(top_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, V2(10, 0));
    Label(top_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, V2(10, 0));
 
-   element *content = Panel(root, StackLayout, V2(Size(root->bounds).x, Size(root->bounds).y - 20));
+   element *content = StackPanel(root, V2(Size(root->bounds).x, Size(root->bounds).y - 20));
    
-   element *page = Panel(content, ColumnLayout, 
-                         RectMinMax(content->bounds.min + V2(60, 0), content->bounds.max));
+   element *page = ColumnPanel(content, RectMinMax(content->bounds.min + V2(60, 0), content->bounds.max));
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
       case DashboardPage_Subsystem: DrawSubsystem(page, state->selected_subsystem); break;
@@ -525,7 +525,7 @@ void DrawUI(element *root, DashboardState *state) {
    }
 
    if(state->connected.subsystem_count > 0) {
-      element *divider1 = Panel(menu_bar, NULL, V2(Size(menu_bar->bounds).x - 40, 5), V2(10, 0));
+      element *divider1 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
       Background(divider1, BLACK);
 
       for(u32 i = 0; i < state->connected.subsystem_count; i++) {
@@ -538,7 +538,7 @@ void DrawUI(element *root, DashboardState *state) {
          }
       }
 
-      element *divider2 = Panel(menu_bar, NULL, V2(Size(menu_bar->bounds).x - 40, 5), V2(10, 0));
+      element *divider2 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
       Background(divider2, BLACK);
    }
 

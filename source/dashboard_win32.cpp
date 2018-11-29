@@ -183,7 +183,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       
       ui_context.input_state.pos.x = cursor.x;
       ui_context.input_state.pos.y = cursor.y;
-      ui_context.input_state.scroll = 0;
+      ui_context.input_state.vscroll = 0;
    
       ui_context.input_state.left_up = false;
       ui_context.input_state.right_up = false;
@@ -258,9 +258,12 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
                }
             } break;
 
-            case WM_MOUSEWHEEL: {
-               ui_context.input_state.scroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
-            } break;
+            //TODO: implement gesture stuff
+
+            //TODO: reimplement mouse stuff later
+            // case WM_MOUSEWHEEL: {
+            //    ui_context.input_state.scroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
+            // } break;
          }
          
          TranslateMessage(&msg);
@@ -343,15 +346,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       element *root_element = beginFrame(window_size, &ui_context, dt);
       DrawUI(root_element, &state);
       DrawElement(root_element, transform, &gl);
-      
-      if(ui_context.tooltip.length > 0) {
-         element tooltip_element = {};
-         tooltip_element.context = &ui_context;
-         
-         Text(&tooltip_element, ui_context.tooltip, ui_context.input_state.pos - V2(0, 20), 20);
-         DrawRenderCommandBuffer(tooltip_element.first_command,
-                                 RectMinSize(V2(0, 0), window_size), transform, &gl);
-      }
 
       SwapBuffers(gl.dc);
    }

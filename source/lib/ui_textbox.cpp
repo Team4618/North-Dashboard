@@ -19,9 +19,7 @@ struct ui_textbox {
 ui_textbox _TextBox(ui_id id, element *parent, TextBoxData *data, f32 line_height) {
    UIContext *context = parent->context;
    sdfFont *font = context->font;
-   element *e = _Panel(id, parent, NULL, V2(GetMaxCharWidth(font, line_height) * data->size, 
-                       line_height));
-   ui_click inter = DefaultClickInteraction(e);
+   element *e = _Panel(id, parent, V2(GetMaxCharWidth(font, line_height) * data->size, line_height), Captures(INTERACTION_SELECT));
 
    string drawn_text = { data->text, data->used };
    Background(e, V4(0.7, 0.7, 0.7, 1));
@@ -72,7 +70,7 @@ ui_textbox _TextBox(ui_id id, element *parent, TextBoxData *data, f32 line_heigh
    ui_textbox result = {};
    result.e = e;
    result.data = data;
-   result.clicked = inter.clicked;
+   result.clicked = WasClicked(e);
    result.enter = IsSelected(e) && input->key_enter;
    result.changed = changed;
    return result;

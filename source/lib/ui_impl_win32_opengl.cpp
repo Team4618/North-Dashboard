@@ -557,19 +557,8 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
 
 void DrawElement(element *e, mat4 transform, openglContext *gl) {
    DrawRenderCommandBuffer(e->first_command, e->cliprect, transform, gl);
-   
-   UIContext *context = e->context;
-   v2 cursor = context->input_state.pos;
 
-   if(IsActive(e)) {
-      context->active_element_refreshed = true;
-      context->active.last_pos = cursor;
-   }
-
-   if(IsSelected(e)) {
-      context->selected_element_refreshed = true;
-      context->selected.last_pos = cursor;
-   }
+   uiTick(e);
 
    for(element *child = e->first_child; child; child = child->next) {
       DrawElement(child, transform, gl);

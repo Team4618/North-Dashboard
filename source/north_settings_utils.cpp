@@ -172,19 +172,18 @@ void DrawSettings(element *full_page, NorthSettings *state,
          Field_StartingPosition *starting_pos = state->field.starting_positions + i;
          UI_SCOPE(page->context, starting_pos);
 
-         element *field_starting_pos = Panel(field.e, NULL, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px));
+         element *field_starting_pos = Panel(field.e, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px), Captures(INTERACTION_DRAG));
          v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
                                  -sinf(starting_pos->angle * (PI32 / 180)));
          Background(field_starting_pos, RED);
-         Line(field_starting_pos, Center(field_starting_pos->bounds),
-                                  Center(field_starting_pos->bounds) + 10 * direction_arrow,
+         Line(field_starting_pos, Center(field_starting_pos),
+                                  Center(field_starting_pos) + 10 * direction_arrow,
                                   BLACK);
-         ui_drag drag_pos = DefaultDragInteraction(field_starting_pos);
-
-         starting_pos->pos = ClampTo(starting_pos->pos + PixelsToFeet(&field, drag_pos.drag), 
+         
+         starting_pos->pos = ClampTo(starting_pos->pos + PixelsToFeet(&field, GetDrag(field_starting_pos)), 
                                      RectCenterSize(V2(0, 0), field.size_in_ft));
          
-         element *starting_pos_panel = Panel(page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
+         element *starting_pos_panel = Panel(page, V2(Size(page).x, 40), Layout(RowLayout).Margin(0, 5));
          Background(starting_pos_panel, BLUE); 
 
          Label(starting_pos_panel, "X: ", 20);
@@ -207,13 +206,13 @@ void DrawSettings(element *full_page, NorthSettings *state,
             Outline(starting_pos_panel, BLACK);
          }
 
-         field_data_changed |= (drag_pos.drag.x != 0) || (drag_pos.drag.y != 0);
+         field_data_changed |= (GetDrag(field_starting_pos).x != 0) || (GetDrag(field_starting_pos).y != 0);
       }
 
       if((state->field.starting_position_count + 1) < ArraySize(state->field.starting_positions)) {
-         element *add_starting_pos = Panel(page, RowLayout, V2(Size(page->bounds).x, 40), V2(0, 0), V2(0, 5));
+         element *add_starting_pos = RowPanel(page, V2(Size(page->bounds).x, 40), Margin(0, 5).Captures(INTERACTION_CLICK));
          Background(add_starting_pos, RED);
-         if(DefaultClickInteraction(add_starting_pos).clicked) {
+         if(WasClicked(add_starting_pos)) {
             state->field.starting_position_count++;
             state->field.starting_positions[state->field.starting_position_count - 1] = {};
             field_data_changed = true;
@@ -251,7 +250,7 @@ void DrawSettings(element *full_page, NorthSettings *state,
    StaticTextBoxData(new_field_image_file, 15);
 
    if(new_field_open) {
-      element *create_game_window = Panel(field_selector, ColumnLayout, V2(Size(field_selector->bounds).x - 20, 300), V2(10, 10));
+      element *create_game_window = Panel(field_selector, V2(Size(field_selector->bounds).x - 20, 300), Layout(ColumnLayout).Padding(10, 10));
       Background(create_game_window, menu_button.colour);
 
       Label(create_game_window, "Create New Field File", 20);

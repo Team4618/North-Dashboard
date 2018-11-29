@@ -162,9 +162,9 @@ void SetRange(MultiLineGraphData *data, f32 min_time, f32 max_time) {
 #define MultiLineGraph(...) _MultiLineGraph(GEN_UI_ID, __VA_ARGS__)
 void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data, 
                      v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0)) {
-   element *base = _Panel(id + GEN_UI_ID, parent, ColumnLayout, size, padding, margin);
-   element *graph = _Panel(id + GEN_UI_ID, base, ColumnLayout, V2(size.x, size.y - 40));
-   element *control_row = _Panel(id + GEN_UI_ID, base, RowLayout, V2(size.x, 40), V2(0, 5));
+   element *base = _Panel(id + GEN_UI_ID, parent, size, Padding(padding).Margin(margin).Layout(ColumnLayout));
+   element *graph = _Panel(id + GEN_UI_ID, base, V2(size.x, size.y - 40), Layout(ColumnLayout).Captures(INTERACTION_CLICK));
+   element *control_row = _Panel(id + GEN_UI_ID, base, V2(size.x, 40), Padding(0, 5).Layout(RowLayout));
    
    Background(graph, V4(0.7, 0.7, 0.7, 1));
 
@@ -237,11 +237,11 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
 
    f32 cursor_t = lerp(data->min_time, (cursor_x - b.min.x) / Size(b).x, data->max_time);
 
-   ui_click graph_interaction = DefaultClickInteraction(graph);
-   if(graph_interaction.became_active) {
-      data->dragging = true;
-      data->dragBeginT = cursor_t; 
-   }
+   //TODO: fix this
+   // if(graph->became_active) {
+   //    data->dragging = true;
+   //    data->dragBeginT = cursor_t; 
+   // }
 
    if(!IsActive(graph)) {
       if(data->dragging) {

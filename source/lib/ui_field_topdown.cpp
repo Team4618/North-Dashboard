@@ -10,7 +10,7 @@ ui_field_topdown _FieldTopdown(ui_id id, element *parent, texture background_ima
    width = Clamp(0, 700, width);
    v2 size = V2(width, size_in_ft.y  * (width / size_in_ft.x));
    f32 x_padding = (Size(parent->bounds).x - size.x) / 2;
-   element *e = _Panel(id, parent, NULL, size, V2(x_padding, 0));
+   element *e = _Panel(id, parent, size, Padding(x_padding, 0));
    Texture(e, background_image, e->bounds);
 
    ui_field_topdown result = {};
