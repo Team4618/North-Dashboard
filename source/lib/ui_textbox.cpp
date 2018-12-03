@@ -14,6 +14,8 @@ struct ui_textbox {
    bool changed;
 };
 
+//TODO: use stb_textedit?
+
 //TODO: padding & margin
 #define TextBox(...) _TextBox(GEN_UI_ID, __VA_ARGS__)
 ui_textbox _TextBox(ui_id id, element *parent, TextBoxData *data, f32 line_height) {

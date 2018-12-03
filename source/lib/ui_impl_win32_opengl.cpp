@@ -1,4 +1,4 @@
-//NOTE: this needs windows.h, gl.h, wglext.h glext.h, stb_image, common & ui_core
+//NOTE: this needs windows.h, gl.h, wglext.h glext.h, stb_image, stb_truetype common & ui_core
 
 /**
 TODO: RENDERER REWRITE
@@ -118,6 +118,40 @@ texture createTexture(u32 *texels, u32 width, u32 height) {
 void deleteTexture(texture tex) {
    if(tex.handle != 0)
       glDeleteTextures(1, &tex.handle); 
+}
+
+// glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
+//    if(font->glyphs[codepoint] == NULL) {
+//       glyph_texture *new_glyph = PushStruct(&font->arena, glyph_texture);
+//       new_glyph->codepoint = codepoint;
+      
+//       u32 size = 128;
+//       u32 miplevel = 0;      
+//       s32 w, h;
+//       u8 *mono = stbtt_GetCodepointBitmap(&font->fontinfo, 0, stbtt_ScaleForPixelHeight(&font->fontinfo, 20), c, &w, &h, 0, 0);
+//       //TODO: free texels
+//       u32 
+
+//       GLuint handle = 0;
+//       glCreateTextures(GL_TEXTURE_2D, 1, &handle);
+//       glTextureStorage2D(handle, 1, GL_RGBA8, size, size);
+//       glTextureSubImage2D(handle, miplevel, 0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE, texels);
+//       glTextureParameteri(handle, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+//       glTextureParameteri(handle, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      
+//       new_glyph->tex.size = V2(size, size);
+//       new_glyph->tex.handle = handle;
+//    }
+
+//    return font->glyphs[codepoint];
+// }
+
+loaded_font loadFont(buffer ttf_file, MemoryArena arena) {
+   loaded_font result = {};
+   result.arena = arena;
+   stbtt_InitFont(&result.fontinfo, ttf_file.data, 
+                  stbtt_GetFontOffsetForIndex(ttf_file.data, 0));
+   return result;
 }
 
 sdfFont loadFont(char *metaPath, char *texturePath) {

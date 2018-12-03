@@ -10,13 +10,26 @@ struct glyphInfo {
    f32 xadvance;
 };
 
-//TODO: move to vector fonts (draw the beziers from the .ttf directly) 
+//TODO: load fonts from a ttf using stb_truetype 
 struct sdfFont {
    texture sdfTexture;
    f32 native_line_height;
    f32 max_char_width;
    glyphInfo glyphs[128];
 };
+
+//---------------------------
+struct glyph_texture {
+   u32 codepoint;
+   texture tex;
+};
+
+struct loaded_font {
+   MemoryArena arena;
+   glyph_texture *glyphs[128];
+   stbtt_fontinfo fontinfo;
+};
+//---------------------------
 
 enum RenderCommandType {
    RenderCommand_SDF,
@@ -94,6 +107,7 @@ ui_id operator+ (ui_id a, ui_id b) {
 
 struct InputState {
    //NOTE: Mouse pos, scroll & buttons
+   v2 last_pos;
    v2 pos;
    f32 vscroll;
    f32 hscroll;
@@ -142,12 +156,19 @@ struct UIContext {
    ui_id selected_e;
    
    ui_id dragged_e;
-   ui_id new_dragged_e;
    v2 drag;
+   ui_id new_dragged_e;
+   v2 new_drag;
    
    ui_id vscroll_e;
-   ui_id new_vscroll_e;
    f32 vscroll;
+   ui_id new_vscroll_e;
+   f32 new_vscroll;
+
+   ui_id hscroll_e;
+   f32 hscroll;
+   ui_id new_hscroll_e;
+   f32 new_hscroll;
 
    f64 curr_time;
    f64 dt;
@@ -218,6 +239,21 @@ element *beginFrame(v2 window_size, UIContext *context, f32 dt) {
    context->clicked_e = context->new_clicked_e;
    context->new_clicked_e = NULL_UI_ID;
    
+   context->dragged_e = context->new_dragged_e;
+   context->drag = context->new_drag;
+   context->new_clicked_e = NULL_UI_ID;
+   context->new_drag = V2(0, 0);
+
+   context->vscroll_e = context->new_vscroll_e;
+   context->vscroll = context->new_vscroll;
+   context->new_vscroll_e = NULL_UI_ID;
+   context->new_vscroll = 0;
+
+   context->hscroll_e = context->new_hscroll_e;
+   context->hscroll = context->new_hscroll;
+   context->new_hscroll_e = NULL_UI_ID;
+   context->new_hscroll = 0;
+
    context->curr_time += dt;
    context->dt = dt;
    context->fps = 1.0 / dt;
@@ -273,6 +309,7 @@ RenderCommand *Line(element *e, v2 a, v2 b, v4 colour, f32 thickness = 2) {
 
 void Outline(element *e, v4 colour, f32 thickness = 2) {
    rect2 b = e->bounds;
+   //TODO: move the outline in by the thickness
    Line(e, V2(b.min.x, b.min.y), V2(b.max.x, b.min.y), colour, thickness);
    Line(e, V2(b.max.x, b.min.y), V2(b.max.x, b.max.y), colour, thickness);
    Line(e, V2(b.max.x, b.max.y), V2(b.min.x, b.max.y), colour, thickness);
@@ -431,14 +468,23 @@ v2 GetDrag(element *e) {
    return (e->id == e->context->dragged_e) ? e->context->drag : V2(0, 0);
 }
 
+f32 GetVerticalScroll(element *e) {
+   AssertHasFlags(e->captures, INTERACTION_VERTICAL_SCROLL);
+   return (e->id == e->context->vscroll_e) ? e->context->vscroll : 0;
+}
+
+f32 GetHorizontalScroll(element *e) {
+   AssertHasFlags(e->captures, INTERACTION_HORIZONTAL_SCROLL);
+   return (e->id == e->context->hscroll_e) ? e->context->hscroll : 0;
+}
+
 void uiTick(element *e) {
    UIContext *context = e->context;
    InputState *input = &context->input_state; 
-   v2 cursor = context->input_state.pos;
-
+   
    if(e->captures & INTERACTION_HOT) {
       bool can_become_hot = (context->active_e == NULL_UI_ID) || (context->active_e == e->id);
-      if(Contains(e->bounds, cursor) && can_become_hot) {
+      if(Contains(e->bounds, input->pos) && can_become_hot) {
          context->new_hot_e = e->id;
       }
    }
@@ -464,23 +510,26 @@ void uiTick(element *e) {
    if(e->captures & _INTERACTION_DRAG) {
       if(IsActive(e)) {
          context->new_dragged_e = e->id;
-         //context->drag = cursor - last_cursor;
+         context->new_drag = input->pos - input->last_pos;
       }
    }
 
    if(e->captures & _INTERACTION_VERTICAL_SCROLL) {
       if(IsHot(e)) {
          context->new_vscroll_e = e->id;
-         context->vscroll = input->vscroll;
+         context->new_vscroll = input->vscroll;
       }
    }
 
    if(e->captures & _INTERACTION_HORIZONTAL_SCROLL) {
-
+      if(IsHot(e)) {
+         context->new_hscroll_e = e->id;
+         context->new_hscroll = input->hscroll;
+      }
    }
 
    if(e->captures & INTERACTION_FILEDROP) {
-
+      //TODO: implement this, its the last interaction we need to finish
    }
  }
 
@@ -496,33 +545,39 @@ struct panel_args {
    u32 _captures;
 
    panel_args Layout(layout_setup_callback _layout_setup) {
-      this->_layout_setup = _layout_setup;
-      return *this;
+      panel_args result = *this;
+      result._layout_setup = _layout_setup;
+      return result;
    }
 
    panel_args Padding(v2 _padding) {
-      this->_padding = _padding;
-      return *this;
+      panel_args result = *this;
+      result._padding = _padding;
+      return result;
    }
 
    panel_args Padding(f32 x, f32 y) {
-      this->_padding = V2(x, y);
-      return *this;
+      panel_args result = *this;
+      result._padding = V2(x, y);
+      return result;
    }
 
    panel_args Margin(v2 _margin) {
-      this->_margin = _margin;
-      return *this;
+      panel_args result = *this;
+      result._margin = _margin;
+      return result;
    }
 
    panel_args Margin(f32 x, f32 y) {
-      this->_margin = V2(x, y);
-      return *this;
+      panel_args result = *this;
+      result._margin = V2(x, y);
+      return result;
    }
 
    panel_args Captures(u32 _captures) {
-      this->_captures |= _captures;
-      return *this;
+      panel_args result = *this;
+      result._captures |= _captures;
+      return result;
    }
 };
 
@@ -704,33 +759,3 @@ u8 *_GetOrAllocate(ui_id in_id, UIContext *context, u32 size) {
 }
 
 #define UIPersistentData(ctx, type) (type *) _GetOrAllocate(GEN_UI_ID, ctx, sizeof(type))
-
-//Basic animations-------------------------------------------------
-struct ui_slide_animation {
-   bool init;
-   bool open;
-   f32 min;
-   f32 max;
-   f32 value;
-};
-
-#define SlideAnimation(...) _SlideAnimation(GEN_UI_ID, __VA_ARGS__)
-ui_slide_animation *_SlideAnimation(ui_id id, UIContext *context, f32 min, f32 max, f32 time) {
-   ui_slide_animation *result = (ui_slide_animation *) _GetOrAllocate(id, context, sizeof(ui_slide_animation));
-   
-   if(!result->init) {
-      result->init = true;
-      result->min = min;
-      result->value = min;
-      result->max = max;
-   }
-
-   Assert(result->min == min);
-   Assert(result->max == max);
-   
-   f32 displacement = (result->open ? 1 : -1) * ((max - min) / time) * context->dt;
-   result->value = Clamp(min, max, result->value + displacement);
-
-   return result;
-}
-//---------------------------------------------------------------------

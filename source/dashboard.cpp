@@ -292,38 +292,38 @@ void DrawHome(element *page, DashboardState *state) {
       //TODO: draw current auto path
       
       if(state->home_field.starting_pos_selected) {
-         element *auto_selector = VerticalList(SlidingSidePanel(page, 300, 5, 50, true));
-         Background(auto_selector, V4(0.5, 0.5, 0.5, 0.5));
+         // element *auto_selector = VerticalList(SlidingSidePanel(page, 300, 5, 50, true));
+         // Background(auto_selector, V4(0.5, 0.5, 0.5, 0.5));
 
-         bool drawing_auto_preview = false;
-         Label(auto_selector, "Autos", 20);
-         //TODO: dont load on file change & show all autos
-         //      load when a position is selected & check if it starts there 
-         for(AutoProjectLink *auto_proj = state->auto_programs.first; auto_proj; auto_proj = auto_proj->next) {
-            UI_SCOPE(auto_selector->context, auto_proj);
+         // bool drawing_auto_preview = false;
+         // Label(auto_selector, "Autos", 20);
+         // //TODO: dont load on file change & show all autos
+         // //      load when a position is selected & check if it starts there 
+         // for(AutoProjectLink *auto_proj = state->auto_programs.first; auto_proj; auto_proj = auto_proj->next) {
+         //    UI_SCOPE(auto_selector->context, auto_proj);
 
-            ui_button btn = Button(auto_selector, menu_button, auto_proj->name);
+         //    ui_button btn = Button(auto_selector, menu_button, auto_proj->name);
 
-            if(btn.clicked) {
-               //state->selected_auto_project = auto_proj;
-            }
+         //    if(btn.clicked) {
+         //       //state->selected_auto_project = auto_proj;
+         //    }
 
-            if(IsHot(btn.e)) {
-               DrawAutoNode(state, &field, auto_proj->starting_node, true);
-               drawing_auto_preview = true;
-            }
-         }
+         //    if(IsHot(btn.e)) {
+         //       DrawAutoNode(state, &field, auto_proj->starting_node, true);
+         //       drawing_auto_preview = true;
+         //    }
+         // }
 
-         if(false /*state->selected_auto_node*/) {
-            //TODO: reorder path priorities
-         }
+         // if(false /*state->selected_auto_node*/) {
+         //    //TODO: reorder path priorities
+         // }
 
-         if(false /*state->selected_auto_node*/) {
-            //DrawAutoNode(state, &field, state->selected_auto_project->starting_node, false);
-            if(Button(base, menu_button, "Upload Auto").clicked) {
-               //TODO: upload auto
-            }
-         }
+         // if(false /*state->selected_auto_node*/) {
+         //    //DrawAutoNode(state, &field, state->selected_auto_project->starting_node, false);
+         //    if(Button(base, menu_button, "Upload Auto").clicked) {
+         //       //TODO: upload auto
+         //    }
+         // }
       }
 
    } else {
@@ -378,7 +378,8 @@ void DrawRecordings(element *full_page, DashboardState *state) {
       Label(page, "No run selected", 20);
 
       if(state->current_profile.state == RobotProfileState::Connected) {
-         if(Button(page, menu_button, Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"))).clicked) {
+         string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));
+         if(Button(page, toggle_recording_text, menu_button).clicked) {
             if(state->manual_recorder.recording) {
                //TODO: actually generate a name for these
                EndRecording(&state->manual_recorder, Literal("name"));
@@ -389,18 +390,18 @@ void DrawRecordings(element *full_page, DashboardState *state) {
       }
    }
    
-   element *recording_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
-   Background(recording_selector, V4(0.5, 0.5, 0.5, 0.5));
-   //TODO: readd this
-   // if(DefaultClickInteraction(recording_selector).clicked) {
-   //    state->recording.loaded = false;
-   // }
+   // element *recording_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
+   // Background(recording_selector, V4(0.5, 0.5, 0.5, 0.5));
+   // //TODO: readd this
+   // // if(DefaultClickInteraction(recording_selector).clicked) {
+   // //    state->recording.loaded = false;
+   // // }
 
-   for(FileListLink *file = state->ncrr_files; file; file = file->next) {
-      if(_Button(POINTER_UI_ID(file), recording_selector, menu_button, file->name).clicked) {
-         LoadRecording(&state->recording, file->name);
-      }
-   }
+   // for(FileListLink *file = state->ncrr_files; file; file = file->next) {
+   //    if(_Button(POINTER_UI_ID(file), recording_selector, menu_button, file->name).clicked) {
+   //       LoadRecording(&state->recording, file->name);
+   //    }
+   // }
 }
 
 void DrawRobots(element *full_page, DashboardState *state) {
@@ -413,7 +414,7 @@ void DrawRobots(element *full_page, DashboardState *state) {
       RobotProfile *profile = state->selected_profile;
       Label(page, profile->name, 20);
       
-      if(Button(page, menu_button, "Load").clicked) {
+      if(Button(page, "Load", menu_button).clicked) {
          LoadProfileFile(&state->current_profile, profile->name);
       }
 
@@ -450,61 +451,73 @@ void DrawRobots(element *full_page, DashboardState *state) {
       }
    }
 
-   element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
-   Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
+   // element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
+   // Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
 
-   if(state->current_profile.state == RobotProfileState::Connected) {
-      if(Button(run_selector, menu_button, "Connected Robot").clicked) {
-         state->selected_profile = &state->current_profile;
-      }
+   // if(state->current_profile.state == RobotProfileState::Connected) {
+   //    if(Button(run_selector, menu_button, "Connected Robot").clicked) {
+   //       state->selected_profile = &state->current_profile;
+   //    }
 
-      element *divider = Panel(run_selector, V2(Size(run_selector->bounds).x - 40, 5), Padding(10, 0));
-      Background(divider, BLACK);
-   }
+   //    element *divider = Panel(run_selector, V2(Size(run_selector->bounds).x - 40, 5), Padding(10, 0));
+   //    Background(divider, BLACK);
+   // }
 
-   for(FileListLink *file = state->ncrp_files; file; file = file->next) {
-      if((state->current_profile.state == RobotProfileState::Connected) && 
-         (state->current_profile.name == file->name))
-      {
-         continue;
-      }
+   // for(FileListLink *file = state->ncrp_files; file; file = file->next) {
+   //    if((state->current_profile.state == RobotProfileState::Connected) && 
+   //       (state->current_profile.name == file->name))
+   //    {
+   //       continue;
+   //    }
       
-      if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
-         LoadProfileFile(&state->loaded_profile, file->name);
+   //    if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
+   //       LoadProfileFile(&state->loaded_profile, file->name);
 
-         if(IsValid(&state->loaded_profile))
-            state->selected_profile = &state->loaded_profile;
-      }
+   //       if(IsValid(&state->loaded_profile))
+   //          state->selected_profile = &state->loaded_profile;
+   //    }
+   // }
+}
+
+#define PageButton(...) _PageButton(GEN_UI_ID, __VA_ARGS__)
+void _PageButton(ui_id id, element *parent, char *name, DashboardPage page, DashboardState *state) {
+   button_style style = menu_button.IsSelected(state->page == page);
+   if(_Button(id, parent, name, style).clicked) {
+      state->page = page;
    }
 }
 
 void DrawUI(element *root, DashboardState *state) {
    //OutputDebugStringA(ToCString(Concat(Literal("fps "), ToString(root->context->fps), Literal("\n"))));
-   
-   Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
    ColumnLayout(root);
+   Background(root, light_grey);
+   Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
    
    if(state->directory_changed) {
       reloadFiles(state);
    }
 
-   element *top_bar = RowPanel(root, V2(Size(root->bounds).x, 20), Captures(INTERACTION_CLICK));
-   
-   Background(top_bar, V4(0.5, 0.5, 0.5, 1));
+   element *status_bar = RowPanel(root, V2(Size(root).x, status_bar_height));
+   Background(status_bar, dark_grey);
    if(state->current_profile.state == RobotProfileState::Connected) {
-      Label(top_bar, state->current_profile.name, 20, V2(10, 0));
-      Label(top_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, V2(10, 0));
+      Label(status_bar, state->current_profile.name, 20, V2(10, 0));
+      Label(status_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, V2(10, 0));
    } else if(state->current_profile.state == RobotProfileState::Loaded) {
-      Label(top_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, V2(10, 0));
+      Label(status_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, V2(10, 0));
    } else {
-      Label(top_bar, "No Robot", 20, V2(5, 0));
+      Label(status_bar, "No Robot", 20, V2(5, 0));
    }
-   Label(top_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, V2(10, 0));
-   Label(top_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, V2(10, 0));
+   Label(status_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, V2(10, 0));
+   Label(status_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, V2(10, 0));
 
-   element *content = StackPanel(root, V2(Size(root->bounds).x, Size(root->bounds).y - 20));
-   
-   element *page = ColumnPanel(content, RectMinMax(content->bounds.min + V2(60, 0), content->bounds.max));
+   element *page_tabs = RowPanel(root, V2(Size(root).x, page_tab_height));
+   Background(page_tabs, dark_grey);
+   PageButton(page_tabs, "Home", DashboardPage_Home, state);
+   PageButton(page_tabs, "Recordings", DashboardPage_Recordings, state);
+   PageButton(page_tabs, "Robots", DashboardPage_Robots, state);
+   PageButton(page_tabs, "Settings", DashboardPage_Settings, state);
+
+   element *page = ColumnPanel(root, RectMinMax(root->bounds.min + V2(0, status_bar_height + page_tab_height), root->bounds.max));
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
       case DashboardPage_Subsystem: DrawSubsystem(page, state->selected_subsystem); break;
@@ -517,45 +530,26 @@ void DrawUI(element *root, DashboardState *state) {
       } break;
    }
 
-   element *menu_bar = VerticalList(SlidingSidePanel(content, 300, 5, 50, false));
-   Background(menu_bar, V4(0.5, 0.5, 0.5, 0.5));
-   
-   if(Button(menu_bar, menu_button, "Home").clicked) {
-      state->page = DashboardPage_Home;
-   }
+   //TODO: where do we put these now?
+   // if(state->connected.subsystem_count > 0) {
+   //    element *divider1 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
+   //    Background(divider1, BLACK);
 
-   if(state->connected.subsystem_count > 0) {
-      element *divider1 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
-      Background(divider1, BLACK);
+   //    for(u32 i = 0; i < state->connected.subsystem_count; i++) {
+   //       ConnectedSubsystem *subsystem = state->connected.subsystems + i; 
+   //       button_style style = menu_button;
+   //       style.colour = V4(0.55, 0, 0, 0.5);
+   //       if(_Button(POINTER_UI_ID(i), menu_bar, style, subsystem->name).clicked) {
+   //          state->page = DashboardPage_Subsystem;
+   //          state->selected_subsystem = subsystem;
+   //       }
+   //    }
 
-      for(u32 i = 0; i < state->connected.subsystem_count; i++) {
-         ConnectedSubsystem *subsystem = state->connected.subsystems + i; 
-         button_style style = menu_button;
-         style.colour = V4(0.55, 0, 0, 0.5);
-         if(_Button(POINTER_UI_ID(i), menu_bar, style, subsystem->name).clicked) {
-            state->page = DashboardPage_Subsystem;
-            state->selected_subsystem = subsystem;
-         }
-      }
-
-      element *divider2 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
-      Background(divider2, BLACK);
-   }
-
-   if(Button(menu_bar, menu_button, "Recordings").clicked) {
-      state->page = DashboardPage_Recordings;
-   }
-
-   if(Button(menu_bar, menu_button, "Robots").clicked) {
-      state->page = DashboardPage_Robots;
-   }
-
-   if(Button(menu_bar, menu_button, "Settings").clicked) {
-      state->page = DashboardPage_Settings;
-   }
+   //    element *divider2 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
+   //    Background(divider2, BLACK);
+   // }
 
    //TODO: move recordings to their own thread
-
    if((state->mode == North_GameMode::Autonomous) && 
       (state->prev_mode != North_GameMode::Autonomous)) {
       BeginRecording(&state->auto_recorder);

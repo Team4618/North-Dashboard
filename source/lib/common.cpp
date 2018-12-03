@@ -156,7 +156,6 @@ bool IsUInt(string s) {
    return true;
 }
 
-//TODO: improve this
 struct MemoryArenaBlock {
    MemoryArenaBlock *next;
    u64 size;
@@ -281,7 +280,6 @@ void WriteString(buffer *b, string str) {
 
 #define WriteStructData(b, type, name, code) do { type name = {}; code WriteStruct(b, &name); } while(false)
 
-//TODO: make the temp memory stuff a bit more advanced, eg. scope local temp arenas
 MemoryArena __temp_arena;
 
 #define PushTempSize(size) PushSize(&__temp_arena, (size))
@@ -289,6 +287,11 @@ MemoryArena __temp_arena;
 #define PushTempArray(struct, length) (struct *) PushSize(&__temp_arena, (length) * sizeof(struct))
 #define PushTempCopy(string) PushCopy(&__temp_arena, (string))
 #define PushTempBuffer(size) PushBuffer(&__temp_arena, (size))
+
+//TODO: make the temp memory stuff a bit more advanced, eg. scope local temp arenas
+// struct TempArena {
+//    MemoryArenaBlock *
+// };
 
 //--------------REWRITE THIS ASAP-----------------
 //------------------------------------------------

@@ -8,6 +8,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "lib/stb_image.h"
 
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "lib/stb_truetype.h"
+
 #define COMMON_PLATFORM
 #include "lib/common.cpp"
 #include "lib/ui_core.cpp"
@@ -176,25 +179,27 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       timer = new_time;
 
       state.curr_time += dt;
-
+      
+      InputState *input = &ui_context.input_state;
       POINT cursor = {};
       GetCursorPos(&cursor);
       ScreenToClient(window.handle, &cursor);
       
-      ui_context.input_state.pos.x = cursor.x;
-      ui_context.input_state.pos.y = cursor.y;
-      ui_context.input_state.vscroll = 0;
+      input->last_pos = input->pos;
+      input->pos = V2(cursor.x, cursor.y);
+      input->vscroll = 0;
+      input->hscroll = 0;
    
-      ui_context.input_state.left_up = false;
-      ui_context.input_state.right_up = false;
+      input->left_up = false;
+      input->right_up = false;
 
-      ui_context.input_state.key_char = 0;
-      ui_context.input_state.key_backspace = false;
-      ui_context.input_state.key_enter = false;
-      ui_context.input_state.key_up_arrow = false;
-      ui_context.input_state.key_down_arrow = false;
-      ui_context.input_state.key_left_arrow = false;
-      ui_context.input_state.key_right_arrow = false;
+      input->key_char = 0;
+      input->key_backspace = false;
+      input->key_enter = false;
+      input->key_up_arrow = false;
+      input->key_down_arrow = false;
+      input->key_left_arrow = false;
+      input->key_right_arrow = false;
 
       MSG msg = {};
       while(PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -258,12 +263,35 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
                }
             } break;
 
-            //TODO: implement gesture stuff
+            //TODO: touch compatable stuff
 
-            //TODO: reimplement mouse stuff later
-            // case WM_MOUSEWHEEL: {
-            //    ui_context.input_state.scroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
-            // } break;
+            case WM_MOUSEWHEEL: {
+               ui_context.input_state.vscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
+            } break;
+
+            case WM_MOUSEHWHEEL: {
+               ui_context.input_state.hscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
+            } break;
+
+            default: {
+               string msg_name;
+               switch(msg.message) {
+                  case 275: {
+                     msg_name = Literal("Timer");
+                  } break;
+
+                  case 512: {
+                     msg_name = Literal("Mouse move");
+                  } break;
+
+                  default: {
+                     msg_name = ToString(msg.message);
+                  } break;
+               }
+
+               string text = Concat(Literal("Unhandled Message "), msg_name, Literal("\n"));
+               OutputDebugStringA(ToCString(text));
+            } break;
          }
          
          TranslateMessage(&msg);

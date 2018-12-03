@@ -31,7 +31,7 @@ element *_VerticalList(ui_id id, element *parent, rect2 bounds) {
    data->last_length = data->length;
    data->length = 0;
 
-   element *content = _Panel(id + GEN_UI_ID, base, bounds);
+   element *content = _Panel(id + GEN_UI_ID, base, bounds, Captures(INTERACTION_VERTICAL_SCROLL));
    element *scroll  = _Panel(id + GEN_UI_ID, base, bounds);
 
    vertical_list_layout_data *layout_data = PushStruct(&context->frame_arena, vertical_list_layout_data); 
@@ -56,7 +56,7 @@ element *_VerticalList(ui_id id, element *parent, rect2 bounds) {
    element *scroll_handle = _Panel(id + GEN_UI_ID, scroll_column, scroll_handle_rect, Captures(INTERACTION_DRAG));
    Background(scroll_handle, IsActive(scroll_handle) ? RED : BLACK);
 
-   data->scroll_offset += GetDrag(scroll_handle).y; //TODO: the scroll speed isnt 1:1, the bigger last_length the faster we should scroll
+   data->scroll_offset += GetDrag(scroll_handle).y - GetVerticalScroll(content); //TODO: the scroll speed isnt 1:1, the bigger last_length the faster we should scroll
    data->scroll_offset = Clamp(0, Max(0, max_offset), data->scroll_offset);
 
    return content;

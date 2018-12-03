@@ -193,7 +193,7 @@ void DrawSettings(element *full_page, NorthSettings *state,
          Label(starting_pos_panel, "Angle: ", 20);
          field_data_changed |= TextBox(starting_pos_panel, &starting_pos->angle, 20).valid_changed;
 
-         if(Button(starting_pos_panel, menu_button, "Delete").clicked) {
+         if(Button(starting_pos_panel, "Delete", menu_button).clicked) {
             for(u32 j = i; j < (state->field.starting_position_count - 1); j++) {
                state->field.starting_positions[j] = state->field.starting_positions[j + 1];
             }
@@ -226,63 +226,64 @@ void DrawSettings(element *full_page, NorthSettings *state,
       Label(page, Concat(state->field_name, Literal(".ncff not found")), 20);
    }
 
-   element *field_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 50, true));
-   Background(field_selector, V4(0.5, 0.5, 0.5, 0.5));
+   //TODO: redo the settings ui
+   // element *field_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 50, true));
+   // Background(field_selector, V4(0.5, 0.5, 0.5, 0.5));
    
-   Label(field_selector, "Fields", 50); //TODO: center this
+   // Label(field_selector, "Fields", 50); //TODO: center this
    
-   for(FileListLink *file = ncff_files; file; file = file->next) {
-      if(_Button(POINTER_UI_ID(file), field_selector, menu_button, file->name).clicked) {
-         //TODO: this is safe because the ReadSettingsFile allocates field_name in settings_arena
-         //       its pretty ugly tho so clean up
-         state->field_name = file->name;
-         UpdateSettingsFile(state);
-         ReadSettingsFile(state);
-      }
-   }
+   // for(FileListLink *file = ncff_files; file; file = file->next) {
+   //    if(_Button(POINTER_UI_ID(file), field_selector, menu_button, file->name).clicked) {
+   //       //TODO: this is safe because the ReadSettingsFile allocates field_name in settings_arena
+   //       //       its pretty ugly tho so clean up
+   //       state->field_name = file->name;
+   //       UpdateSettingsFile(state);
+   //       ReadSettingsFile(state);
+   //    }
+   // }
 
-   //TODO: dont know if i like using static like this, especially for the textboxes
-   //      mainly because it takes up a name, SettingsRow is pretty bad too
-   static bool new_field_open = false; 
-   static f32 new_field_width = 0;
-   static f32 new_field_height = 0;
-   StaticTextBoxData(new_field_name, 15);
-   StaticTextBoxData(new_field_image_file, 15);
+   // //TODO: dont know if i like using static like this, especially for the textboxes
+   // //      mainly because it takes up a name, SettingsRow is pretty bad too
+   // static bool new_field_open = false; 
+   // static f32 new_field_width = 0;
+   // static f32 new_field_height = 0;
+   // StaticTextBoxData(new_field_name, 15);
+   // StaticTextBoxData(new_field_image_file, 15);
 
-   if(new_field_open) {
-      element *create_game_window = Panel(field_selector, V2(Size(field_selector->bounds).x - 20, 300), Layout(ColumnLayout).Padding(10, 10));
-      Background(create_game_window, menu_button.colour);
+   // if(new_field_open) {
+   //    element *create_game_window = Panel(field_selector, V2(Size(field_selector->bounds).x - 20, 300), Layout(ColumnLayout).Padding(10, 10));
+   //    Background(create_game_window, menu_button.colour);
 
-      Label(create_game_window, "Create New Field File", 20);
-      ui_textbox name_box = SettingsRow(create_game_window, "Name: ", &new_field_name);
-      ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &new_field_width, "ft");
-      ui_numberbox height_box = SettingsRow(create_game_window, "Height: ", &new_field_height, "ft");
-      ui_textbox image_file_box = SettingsRow(create_game_window, "Image: ", &new_field_image_file);
+   //    Label(create_game_window, "Create New Field File", 20);
+   //    ui_textbox name_box = SettingsRow(create_game_window, "Name: ", &new_field_name);
+   //    ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &new_field_width, "ft");
+   //    ui_numberbox height_box = SettingsRow(create_game_window, "Height: ", &new_field_height, "ft");
+   //    ui_textbox image_file_box = SettingsRow(create_game_window, "Image: ", &new_field_image_file);
 
-      bool valid = (GetText(name_box).length > 0) &&
-                   (GetText(image_file_box).length > 0) &&
-                   width_box.valid && (new_field_width > 0) &&
-                   height_box.valid && (new_field_height > 0);
+   //    bool valid = (GetText(name_box).length > 0) &&
+   //                 (GetText(image_file_box).length > 0) &&
+   //                 width_box.valid && (new_field_width > 0) &&
+   //                 height_box.valid && (new_field_height > 0);
       
-      if(Button(create_game_window, menu_button, "Create", valid).clicked) {
-         WriteNewFieldFile(GetText(name_box), 
-                           new_field_width,
-                           new_field_height,
-                           GetText(image_file_box));
-         new_field_open = false;
-      }
+   //    if(Button(create_game_window, menu_button, "Create", valid).clicked) {
+   //       WriteNewFieldFile(GetText(name_box), 
+   //                         new_field_width,
+   //                         new_field_height,
+   //                         GetText(image_file_box));
+   //       new_field_open = false;
+   //    }
 
-      if(Button(create_game_window, menu_button, "Exit").clicked) {
-         new_field_width = 0;
-         new_field_height = 0;
-         Clear(name_box);
-         Clear(image_file_box);
-         new_field_open = false;
-      }
-   } else {
-      if(Button(field_selector, menu_button, "Create Field").clicked) {
-         new_field_open = true;
-      }
-   }
+   //    if(Button(create_game_window, menu_button, "Exit").clicked) {
+   //       new_field_width = 0;
+   //       new_field_height = 0;
+   //       Clear(name_box);
+   //       Clear(image_file_box);
+   //       new_field_open = false;
+   //    }
+   // } else {
+   //    if(Button(field_selector, menu_button, "Create Field").clicked) {
+   //       new_field_open = true;
+   //    }
+   // }
 }
 #endif

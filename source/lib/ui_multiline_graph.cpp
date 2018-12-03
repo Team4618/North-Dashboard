@@ -168,28 +168,30 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
    
    Background(graph, V4(0.7, 0.7, 0.7, 1));
 
-   button_style control_button_style = ButtonStyle(V4(0.5, 0.5, 0.5, 1), 30, V2(0, 0), V2(5, 5));
+   button_style control_button_style = ButtonStyle(V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
+                                                   V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
+                                                   30, V2(0, 0), V2(5, 5));
    
-   if(_Button(id + GEN_UI_ID, control_row, control_button_style, "Clear").clicked) {
+   if(_Button(id + GEN_UI_ID, control_row, "Clear", control_button_style).clicked) {
       ResetMultiLineGraph(data);
    }
 
-   if(_Button(id + GEN_UI_ID, control_row, control_button_style, "Pause").clicked) {
+   if(_Button(id + GEN_UI_ID, control_row, "Pause", control_button_style).clicked) {
       data->automatic_max_time = false;
    }
 
-   if(_Button(id + GEN_UI_ID, control_row, control_button_style, "Reset Min Time").clicked) {
+   if(_Button(id + GEN_UI_ID, control_row, "Reset Min Time", control_button_style).clicked) {
       SetRange(data, data->abs_max_time, data->abs_max_time);
       data->automatic_max_time = true;
    }
 
-   if(_Button(id + GEN_UI_ID, control_row, control_button_style, "Full Time").clicked) {
+   if(_Button(id + GEN_UI_ID, control_row, "Full Time", control_button_style).clicked) {
       SetRange(data, data->abs_min_time, data->abs_max_time);
       data->automatic_max_time = true;
    }
 
    for(LineGraph *curr_graph = data->first; curr_graph; curr_graph = curr_graph->next) {
-      ui_button btn = _Button(POINTER_UI_ID(curr_graph), control_row, control_button_style, curr_graph->name);
+      ui_button btn = _Button(POINTER_UI_ID(curr_graph), control_row, curr_graph->name, control_button_style);
 
       if(btn.clicked) {
          curr_graph->hidden = !curr_graph->hidden;
