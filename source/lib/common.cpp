@@ -602,6 +602,11 @@ mat4 Orthographic(f32 top, f32 bottom, f32 left, f32 right, f32 nearPlane, f32 f
 
 string exe_directory = {};
 
+u64 total_size_requested = 0;
+u64 total_size_allocated = 0;
+u32 arenas_allocated = 0;
+u32 arena_blocks_allocated = 0;
+
 //------------------PLATFORM-SPECIFIC-STUFF---------------------
 #ifdef COMMON_PLATFORM
    #if defined(_WIN32)
@@ -616,11 +621,6 @@ string exe_directory = {};
       // #define WRITE_BARRIER MemoryBarrier()
 
       //TODO: take a look at the weird memory usage
-      u64 total_size_requested = 0;
-      u64 total_size_allocated = 0;
-      u32 arenas_allocated = 0;
-      u32 arena_blocks_allocated = 0;
-
       MemoryArenaBlock *PlatformAllocArenaBlock(u64 size) {
          //OutputDebugStringA("Allocating Arena Block\n");
          total_size_requested += size;
@@ -835,6 +835,23 @@ string exe_directory = {};
          return changed;
       }
       
+      //NOTE: this is pretty jank-tastic but itll get cleaned up in future
+      char exepath[MAX_PATH + 1];
+      void Win32CommonInit(MemoryArena temp_arena) {
+         __temp_arena = temp_arena;
+
+         if(0 == GetModuleFileNameA(0, exepath, MAX_PATH + 1))
+            Assert(false);
+            
+         exe_directory = Literal(exepath);
+         for(u32 i = exe_directory.length - 1; i >= 0; i--) {
+            if((exe_directory.text[i] == '\\') || (exe_directory.text[i] == '/'))
+               break;
+
+            exe_directory.length--;
+         }
+      }
+
    #else
       #error "we dont support that platform yet"
    #endif

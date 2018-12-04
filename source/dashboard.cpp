@@ -328,15 +328,15 @@ void DrawHome(element *page, DashboardState *state) {
 
    } else {
       if(!state->settings.field.loaded)
-         Label(page, "No Field", 50);
+         Label(page, "No Field", 50, BLACK);
       
       if(!IsValid(&state->current_profile))
-         Label(page, "No Robot", 50);
+         Label(page, "No Robot", 50, BLACK);
    }
 }
 
 void DrawSubsystem(element *page, ConnectedSubsystem *subsystem) {
-   Label(page, subsystem->name, 50);
+   Label(page, subsystem->name, 50, BLACK);
    MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
 }
 
@@ -357,7 +357,7 @@ void DrawRecordings(element *full_page, DashboardState *state) {
             Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
          }
       } else {
-         Label(page, "No field loaded", 20);
+         Label(page, "No field loaded", 20, BLACK);
       }
 
       //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
@@ -370,12 +370,12 @@ void DrawRecordings(element *full_page, DashboardState *state) {
       for(u32 i = 0; i < state->recording.subsystem_count; i++) {
          SubsystemRecording *subsystem = state->recording.subsystems + i;
          UI_SCOPE(page->context, subsystem);
-         Label(page, subsystem->name, 20);
+         Label(page, subsystem->name, 20, BLACK);
          MultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
       }
 
    } else {
-      Label(page, "No run selected", 20);
+      Label(page, "No run selected", 20, BLACK);
 
       if(state->current_profile.state == RobotProfileState::Connected) {
          string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));
@@ -412,7 +412,7 @@ void DrawRobots(element *full_page, DashboardState *state) {
    
    if(state->selected_profile) {
       RobotProfile *profile = state->selected_profile;
-      Label(page, profile->name, 20);
+      Label(page, profile->name, 20, BLACK);
       
       if(Button(page, "Load", menu_button).clicked) {
          LoadProfileFile(&state->current_profile, profile->name);
@@ -423,22 +423,22 @@ void DrawRobots(element *full_page, DashboardState *state) {
          element *subsystem_page = Panel(page, V2(Size(page).x - 60, 400), Padding(20, 0).Layout(ColumnLayout));
          Background(subsystem_page, V4(0.5, 0.5, 0.5, 0.5));
 
-         Label(subsystem_page, subsystem->name, 20);
+         Label(subsystem_page, subsystem->name, 20, BLACK);
          
-         Label(subsystem_page, "Parameters", 20, V2(0, 20));
+         Label(subsystem_page, "Parameters", 20, BLACK, V2(0, 20));
          for(u32 j = 0; j < subsystem->param_count; j++) {
             RobotProfileParameter *param = subsystem->params + j;
             if(param->is_array) {
-               Label(subsystem_page, Concat(param->name, Literal(": ")), 18, V2(20, 0));
+               Label(subsystem_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
                for(u32 k = 0; k < param->length; k++) {
-                  Label(subsystem_page, ToString(param->values[k]), 18, V2(40, 0));
+                  Label(subsystem_page, ToString(param->values[k]), 18, BLACK, V2(40, 0));
                }
             } else {
-               Label(subsystem_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, V2(20, 0));
+               Label(subsystem_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, BLACK, V2(20, 0));
             }
          }
 
-         Label(subsystem_page, "Commands", 20, V2(0, 20));
+         Label(subsystem_page, "Commands", 20, BLACK, V2(0, 20));
          for(u32 j = 0; j < subsystem->command_count; j++) {
             RobotProfileCommand *command = subsystem->commands + j;
             //TODO: icon for command->type
@@ -446,7 +446,7 @@ void DrawRobots(element *full_page, DashboardState *state) {
             for(u32 k = 1; k < command->param_count; k++) {
                params = Concat(params, Literal(", "), command->params[k]);
             }
-            Label(subsystem_page, Concat(command->name, Literal("("), params, Literal(")")), 18, V2(20, 0));  
+            Label(subsystem_page, Concat(command->name, Literal("("), params, Literal(")")), 18, BLACK, V2(20, 0));  
          }
       }
    }
@@ -479,6 +479,7 @@ void DrawRobots(element *full_page, DashboardState *state) {
    // }
 }
 
+//TODO: icons for pages
 #define PageButton(...) _PageButton(GEN_UI_ID, __VA_ARGS__)
 void _PageButton(ui_id id, element *parent, char *name, DashboardPage page, DashboardState *state) {
    button_style style = menu_button.IsSelected(state->page == page);
@@ -500,15 +501,15 @@ void DrawUI(element *root, DashboardState *state) {
    element *status_bar = RowPanel(root, V2(Size(root).x, status_bar_height));
    Background(status_bar, dark_grey);
    if(state->current_profile.state == RobotProfileState::Connected) {
-      Label(status_bar, state->current_profile.name, 20, V2(10, 0));
-      Label(status_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, V2(10, 0));
+      Label(status_bar, state->current_profile.name, 20, BLACK, V2(10, 0));
+      Label(status_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, BLACK, V2(10, 0));
    } else if(state->current_profile.state == RobotProfileState::Loaded) {
-      Label(status_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, V2(10, 0));
+      Label(status_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, BLACK, V2(10, 0));
    } else {
-      Label(status_bar, "No Robot", 20, V2(5, 0));
+      Label(status_bar, "No Robot", 20, BLACK, V2(5, 0));
    }
-   Label(status_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, V2(10, 0));
-   Label(status_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, V2(10, 0));
+   Label(status_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, BLACK, V2(10, 0));
+   Label(status_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, BLACK, V2(10, 0));
 
    element *page_tabs = RowPanel(root, V2(Size(root).x, page_tab_height));
    Background(page_tabs, dark_grey);

@@ -62,29 +62,6 @@ void HandleConnectionStatus(DashboardState *state) {
    }
 }
 
-LRESULT CALLBACK WindowMessageEvent(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-   switch(message)
-	{
-		case WM_CLOSE:
-			DestroyWindow(window);
-         break;
-		
-		case WM_DESTROY:
-			PostQuitMessage(0);
-         break;
-        
-      case WM_SIZE:
-      {
-         RECT client_rect = {};
-         GetClientRect(window, &client_rect);
-         window_size = V2(client_rect.right, client_rect.bottom);
-         glViewport(0, 0, window_size.x, window_size.y);
-      } break;
-	}
-   
-   return DefWindowProc(window, message, wParam, lParam);
-}
-
 #include "test_file_writing.cpp"
 
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -92,21 +69,9 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    //we load app-crucial files (eg. shaders, font) from the directory that the exe is in, 
    //we load user files (eg. settings, saves) from the working directory   
 
-   __temp_arena = PlatformAllocArena(Megabyte(10));
+   Win32CommonInit(PlatformAllocArena(Megabyte(10)));
 
-   char exepath[MAX_PATH + 1];
-   if(0 == GetModuleFileNameA(0, exepath, MAX_PATH + 1))
-      Assert(false);
-      
-   exe_directory = Literal(exepath);
-   for(u32 i = exe_directory.length - 1; i >= 0; i--) {
-      if((exe_directory.text[i] == '\\') || (exe_directory.text[i] == '/'))
-         break;
-
-      exe_directory.length--;
-   }
-
-   ui_impl_win32_window window = createWindow("North Dashboard", WindowMessageEvent);
+   ui_impl_win32_window window = createWindow("North Dashboard");
    
    //TODO: does this load exe-relative or from the working directory?
    HANDLE hIcon = LoadImageA(0, "icon.ico", IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_LOADFROMFILE);
@@ -120,16 +85,12 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       MessageBox(window.handle, "Error", "Icon Not Found", 0);
    }
 
-   bool running = true;
-
-   ShowWindow(window.handle, nCmdShow);
-   UpdateWindow(window.handle);
-
    initTheme();
 
    UIContext ui_context = {};
    ui_context.frame_arena = PlatformAllocArena(Megabyte(2));
    ui_context.persistent_arena = PlatformAllocArena(Megabyte(2));
+   ui_context.filedrop_arena = PlatformAllocArena(Megabyte(2));
    ui_context.font = &font;
    
    DashboardState state = {};
@@ -159,12 +120,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 
    struct sockaddr_in server_info = {};
    
-   u64 timestamp_before = GetFileTimestamp("test_robot.ncrp");
-
    //NOTE: test code, writes out a bunch of test files
    WriteTestFiles();
-
-   u64 timestamp_after = GetFileTimestamp("test_robot.ncrp");
 
    LARGE_INTEGER frequency;
    QueryPerformanceFrequency(&frequency); 
@@ -172,131 +129,13 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    LARGE_INTEGER timer;
    QueryPerformanceCounter(&timer);
 
-   while(running) {
+   while(PumpMessages(&window, &ui_context)) {
       LARGE_INTEGER new_time;
       QueryPerformanceCounter(&new_time);
       f32 dt = (f32)(new_time.QuadPart - timer.QuadPart) / (f32)frequency.QuadPart;
       timer = new_time;
 
       state.curr_time += dt;
-      
-      InputState *input = &ui_context.input_state;
-      POINT cursor = {};
-      GetCursorPos(&cursor);
-      ScreenToClient(window.handle, &cursor);
-      
-      input->last_pos = input->pos;
-      input->pos = V2(cursor.x, cursor.y);
-      input->vscroll = 0;
-      input->hscroll = 0;
-   
-      input->left_up = false;
-      input->right_up = false;
-
-      input->key_char = 0;
-      input->key_backspace = false;
-      input->key_enter = false;
-      input->key_up_arrow = false;
-      input->key_down_arrow = false;
-      input->key_left_arrow = false;
-      input->key_right_arrow = false;
-
-      MSG msg = {};
-      while(PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
-         switch(msg.message) {
-            case WM_QUIT:
-               running = false;
-               break;
-         
-            case WM_LBUTTONUP:
-               ui_context.input_state.left_down = false;
-               ui_context.input_state.left_up = true;
-               break;
-         
-            case WM_LBUTTONDOWN:
-               ui_context.input_state.left_down = true;
-               ui_context.input_state.left_up = false;
-               break;
-               
-            case WM_RBUTTONUP:
-               ui_context.input_state.right_down = false;
-               ui_context.input_state.right_up = true;
-               break;
-         
-            case WM_RBUTTONDOWN:
-               ui_context.input_state.right_down = true;
-               ui_context.input_state.right_up = false;
-               break;   
-
-            case WM_CHAR: {
-               switch(msg.wParam) {
-                  case 0x08:
-                     ui_context.input_state.key_backspace = true;
-                     break;
-                  case 0x0D:
-                     ui_context.input_state.key_enter = true;
-                     break;
-                  case 0x0A:  // linefeed 
-                  case 0x1B:  // escape 
-                  case 0x09:  // tab 
-                     break;
-                  default:
-                     ui_context.input_state.key_char = (char) msg.wParam;
-                     break;
-               }
-            } break;
-
-            case WM_KEYDOWN: {
-               switch(msg.wParam) {
-                  case VK_UP:
-                     ui_context.input_state.key_up_arrow = true;
-                     break;
-                  case VK_DOWN:
-                     ui_context.input_state.key_down_arrow = true;
-                     break;
-                  case VK_LEFT:
-                     ui_context.input_state.key_left_arrow = true;
-                     break;
-                  case VK_RIGHT:
-                     ui_context.input_state.key_right_arrow = true;
-                     break;
-               }
-            } break;
-
-            //TODO: touch compatable stuff
-
-            case WM_MOUSEWHEEL: {
-               ui_context.input_state.vscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
-            } break;
-
-            case WM_MOUSEHWHEEL: {
-               ui_context.input_state.hscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
-            } break;
-
-            default: {
-               string msg_name;
-               switch(msg.message) {
-                  case 275: {
-                     msg_name = Literal("Timer");
-                  } break;
-
-                  case 512: {
-                     msg_name = Literal("Mouse move");
-                  } break;
-
-                  default: {
-                     msg_name = ToString(msg.message);
-                  } break;
-               }
-
-               string text = Concat(Literal("Unhandled Message "), msg_name, Literal("\n"));
-               OutputDebugStringA(ToCString(text));
-            } break;
-         }
-         
-         TranslateMessage(&msg);
-         DispatchMessageA(&msg);
-      }
 
       state.directory_changed = CheckFiles(&state.file_watcher);
       
@@ -364,18 +203,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       HandleConnectionStatus(&state);
 
       Reset(&__temp_arena);
-
-      glScissor(0, 0, window_size.x, window_size.y);
-      glClearColor(1, 1, 1, 1);
-      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-      
-      mat4 transform = Orthographic(0, window_size.y, 0, window_size.x, 100, -100);
       
       element *root_element = beginFrame(window_size, &ui_context, dt);
       DrawUI(root_element, &state);
-      DrawElement(root_element, transform, &gl);
-
-      SwapBuffers(gl.dc);
+      endFrame(root_element);
    }
    
    return 0;

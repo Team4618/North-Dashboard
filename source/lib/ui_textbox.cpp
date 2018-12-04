@@ -25,7 +25,7 @@ ui_textbox _TextBox(ui_id id, element *parent, TextBoxData *data, f32 line_heigh
 
    string drawn_text = { data->text, data->used };
    Background(e, V4(0.7, 0.7, 0.7, 1));
-   Text(e, drawn_text, e->bounds.min, line_height);
+   Text(e, drawn_text, e->bounds.min, line_height, BLACK);
 
    data->cursor = Clamp(0, data->used, data->cursor);
 

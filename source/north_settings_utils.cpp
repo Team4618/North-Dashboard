@@ -141,10 +141,9 @@ void DrawSettings(element *full_page, NorthSettings *state,
                   FileListLink *ncff_files)
 {
    StackLayout(full_page);
-   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
-                                                      full_page->bounds.max - V2(60, 0)));
+   element *page = VerticalList(full_page);
    
-   Label(page, "Settings", 50);
+   Label(page, "Settings", 50, BLACK);
    
    bool settings_changed = false;
    settings_changed |= SettingsRow(page, "Team Number: ", &state->team_number).valid_enter;
@@ -156,8 +155,8 @@ void DrawSettings(element *full_page, NorthSettings *state,
    if(state->field.loaded) {
       bool field_data_changed = false;
 
-      Label(page, state->field_name, 20);
-      Label(page, "Field Dimensions", 20, V2(0, 0), V2(0, 5));
+      Label(page, state->field_name, 20, BLACK);
+      Label(page, "Field Dimensions", 20, BLACK, V2(0, 0), V2(0, 5));
       field_data_changed |= SettingsRow(page, "Field Width: ", &state->field.size.x, "ft").valid_enter;
       field_data_changed |= SettingsRow(page, "Field Height: ", &state->field.size.y, "ft").valid_enter;
       
@@ -165,7 +164,7 @@ void DrawSettings(element *full_page, NorthSettings *state,
       field_data_changed |= SettingsRow(page, "Field Symmetric (eg. Power Up)", &state->field.flags, Field_Flags::SYMMETRIC, V2(20, 20)).clicked;
 
       ui_field_topdown field = FieldTopdown(page, state->field.image, state->field.size, Size(page->bounds).x);
-      Label(page, robot_size_label, 20);
+      Label(page, robot_size_label, 20, BLACK);
 
       v2 robot_size_px =  FeetToPixels(&field, robot_size_ft);
       for(u32 i = 0; i < state->field.starting_position_count; i++) {
@@ -186,11 +185,11 @@ void DrawSettings(element *full_page, NorthSettings *state,
          element *starting_pos_panel = Panel(page, V2(Size(page).x, 40), Layout(RowLayout).Margin(0, 5));
          Background(starting_pos_panel, BLUE); 
 
-         Label(starting_pos_panel, "X: ", 20);
+         Label(starting_pos_panel, "X: ", 20, BLACK);
          field_data_changed |= TextBox(starting_pos_panel, &starting_pos->pos.x, 20).valid_changed;
-         Label(starting_pos_panel, "Y: ", 20);
+         Label(starting_pos_panel, "Y: ", 20, BLACK);
          field_data_changed |= TextBox(starting_pos_panel, &starting_pos->pos.y, 20).valid_changed;
-         Label(starting_pos_panel, "Angle: ", 20);
+         Label(starting_pos_panel, "Angle: ", 20, BLACK);
          field_data_changed |= TextBox(starting_pos_panel, &starting_pos->angle, 20).valid_changed;
 
          if(Button(starting_pos_panel, "Delete", menu_button).clicked) {
@@ -223,7 +222,7 @@ void DrawSettings(element *full_page, NorthSettings *state,
          UpdateFieldFile(state);
       }
    } else {
-      Label(page, Concat(state->field_name, Literal(".ncff not found")), 20);
+      Label(page, Concat(state->field_name, Literal(".ncff not found")), 20, BLACK);
    }
 
    //TODO: redo the settings ui
@@ -254,6 +253,7 @@ void DrawSettings(element *full_page, NorthSettings *state,
    //    element *create_game_window = Panel(field_selector, V2(Size(field_selector->bounds).x - 20, 300), Layout(ColumnLayout).Padding(10, 10));
    //    Background(create_game_window, menu_button.colour);
 
+   //TODO: get rid of the image name_box & replace it with a file drop thing
    //    Label(create_game_window, "Create New Field File", 20);
    //    ui_textbox name_box = SettingsRow(create_game_window, "Name: ", &new_field_name);
    //    ui_numberbox width_box = SettingsRow(create_game_window, "Width: ", &new_field_width, "ft");

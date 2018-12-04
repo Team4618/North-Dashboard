@@ -22,12 +22,17 @@ struct sdfFont {
 struct glyph_texture {
    u32 codepoint;
    texture tex;
+   v2 size_over_line_height;
 };
 
 struct loaded_font {
    MemoryArena arena;
    glyph_texture *glyphs[128];
    stbtt_fontinfo fontinfo;
+
+   f32 ascent;
+   f32 descent;
+   f32 line_gap;
 };
 //---------------------------
 
@@ -134,12 +139,11 @@ struct persistent_hash_link {
    u8 *data;
 };
 
+//TODO: debugging mode stuff
 struct element;
 struct UIContext {
    sdfFont *font;
    MemoryArena frame_arena;
-   RenderCommand *first_command;
-   RenderCommand *curr_command;
    
    MemoryArena persistent_arena;
    persistent_hash_link *persistent_hash[128];
@@ -169,6 +173,12 @@ struct UIContext {
    f32 hscroll;
    ui_id new_hscroll_e;
    f32 new_hscroll;
+
+   ui_id filedrop_e;
+   ui_id new_filedrop_e;
+   MemoryArena filedrop_arena;
+   u32 filedrop_count;
+   string *filedrop_names;
 
    f64 curr_time;
    f64 dt;
@@ -254,6 +264,9 @@ element *beginFrame(v2 window_size, UIContext *context, f32 dt) {
    context->new_hscroll_e = NULL_UI_ID;
    context->new_hscroll = 0;
 
+   context->filedrop_e = context->new_filedrop_e;
+   context->new_filedrop_e = NULL_UI_ID;
+   
    context->curr_time += dt;
    context->dt = dt;
    context->fps = 1.0 / dt;
@@ -307,13 +320,16 @@ RenderCommand *Line(element *e, v2 a, v2 b, v4 colour, f32 thickness = 2) {
    return result;
 }
 
-void Outline(element *e, v4 colour, f32 thickness = 2) {
-   rect2 b = e->bounds;
+void Outline(element *e, rect2 b, v4 colour, f32 thickness = 2) {
    //TODO: move the outline in by the thickness
    Line(e, V2(b.min.x, b.min.y), V2(b.max.x, b.min.y), colour, thickness);
    Line(e, V2(b.max.x, b.min.y), V2(b.max.x, b.max.y), colour, thickness);
    Line(e, V2(b.max.x, b.max.y), V2(b.min.x, b.max.y), colour, thickness);
    Line(e, V2(b.min.x, b.max.y), V2(b.min.x, b.min.y), colour, thickness);
+}
+
+void Outline(element *e, v4 colour, f32 thickness = 2) {
+   Outline(e, e->bounds, colour, thickness);
 }
 
 RenderCommand *Texture(element *e, texture tex, rect2 bounds) {
@@ -374,37 +390,57 @@ rect2 GetCharBounds(sdfFont *font, string text, u32 char_i, v2 pos, f32 line_hei
 }
 
 //TODO: kerning
-void Text(element *e, string text, v2 pos, f32 line_height) {   
+// void Text(element *e, string text, v2 pos, f32 line_height, v4 colour = V4(0, 0, 0, 1)) {   
+//    UIContext *context = e->context;
+//    sdfFont *font = context->font;
+//    f32 scale = line_height / font->native_line_height;
+   
+//    for(u32 i = 0; i < text.length; i++) {
+//       u32 id = (u32) text.text[i];
+      
+//       if(id < ArraySize(font->glyphs)) {
+//          glyphInfo glyph = font->glyphs[id];
+//          f32 width = scale * glyph.size.x;
+//          f32 height = scale * glyph.size.y; 
+
+//          RenderCommand *command = PushStruct(&context->frame_arena, RenderCommand);
+//          command->type = RenderCommand_SDF;
+//          command->next = NULL;
+//          command->drawSDF.bounds = RectMinSize((scale * glyph.offset) + pos, 
+//                                                V2(width, height));
+//          command->drawSDF.uvBounds = RectMinSize(glyph.textureLocation, glyph.size);
+//          command->drawSDF.sdf = font->sdfTexture;
+//          command->drawSDF.colour = colour;
+         
+//          addCommand(e, command);
+//          pos = pos + V2(scale * glyph.xadvance, 0);
+//       }
+//    }
+// }
+
+extern loaded_font test_font;
+glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint);
+
+void Text(element *e, string text, v2 pos, f32 line_height, v4 colour) {   
    UIContext *context = e->context;
-   sdfFont *font = context->font;
-   f32 scale = line_height / font->native_line_height;
    
    for(u32 i = 0; i < text.length; i++) {
-      u32 id = (u32) text.text[i];
+      glyph_texture *glyph = getOrLoadGlyph(&test_font, text.text[i]);
+      v2 size = line_height * glyph->size_over_line_height;
       
-      if(id < ArraySize(font->glyphs)) {
-         glyphInfo glyph = font->glyphs[id];
-         f32 width = scale * glyph.size.x;
-         f32 height = scale * glyph.size.y; 
-
-         RenderCommand *command = PushStruct(&context->frame_arena, RenderCommand);
-         command->type = RenderCommand_SDF;
-         command->next = NULL;
-         command->drawSDF.bounds = RectMinSize((scale * glyph.offset) + pos, 
-                                               V2(width, height));
-         command->drawSDF.uvBounds = RectMinSize(glyph.textureLocation, glyph.size);
-         command->drawSDF.sdf = font->sdfTexture;
-         command->drawSDF.colour = V4(0, 0, 0, 1);
-         
-         addCommand(e, command);
-         pos = pos + V2(scale * glyph.xadvance, 0);
-      }
+      //TODO: actually respect the text colour
+      Texture(e, glyph->tex, RectMinSize(pos, size));
+      Outline(e, RectMinSize(pos, size), V4(0, 0, 0, 1));
+      pos = pos + V2(size.x, 0);
    }
 }
 
-void Text(element *e, char *s, v2 pos, f32 height) {
-   Text(e, Literal(s), pos, height);
+void Text(element *e, char *s, v2 pos, f32 height, v4 colour) {
+   Text(e, Literal(s), pos, height, colour);
 }
+
+//TODO: pass font in as a param, dont store in context?
+//or maybe we could do themeing in the context?  
 
 #define RED V4(1, 0, 0, 1)
 #define BLUE V4(0, 0, 1, 1)
@@ -478,6 +514,20 @@ f32 GetHorizontalScroll(element *e) {
    return (e->id == e->context->hscroll_e) ? e->context->hscroll : 0;
 }
 
+struct ui_dropped_files {
+   u32 count;
+   string *names;
+};
+
+ui_dropped_files GetDroppedFiles(element *e) {
+   ui_dropped_files result = {};
+   if(e->id == e->context->filedrop_e) {
+      result.count = e->context->filedrop_count;
+      result.names = e->context->filedrop_names;
+   }
+   return result;
+}
+
 void uiTick(element *e) {
    UIContext *context = e->context;
    InputState *input = &context->input_state; 
@@ -529,7 +579,9 @@ void uiTick(element *e) {
    }
 
    if(e->captures & INTERACTION_FILEDROP) {
-      //TODO: implement this, its the last interaction we need to finish
+      if(IsHot(e)) {
+         context->new_filedrop_e = e->id;
+      }
    }
  }
 
@@ -583,38 +635,32 @@ struct panel_args {
 
 panel_args Layout(layout_setup_callback _layout_setup) {
    panel_args result = {};
-   result._layout_setup = _layout_setup;
-   return result;
+   return result.Layout(_layout_setup);
 }
 
 panel_args Padding(v2 _padding) {
    panel_args result = {};
-   result._padding = _padding;
-   return result;
+   return result.Padding(_padding);
 }
 
 panel_args Padding(f32 x, f32 y) {
    panel_args result = {};
-   result._padding = V2(x, y);
-   return result;
+   return result.Padding(V2(x, y));
 }
 
 panel_args Margin(v2 _margin) {
    panel_args result = {};
-   result._margin = _margin;
-   return result;
+   return result.Margin(_margin);
 }
 
 panel_args Margin(f32 x, f32 y) {
    panel_args result = {};
-   result._margin = V2(x, y);
-   return result;
+   return result.Margin(V2(x, y));
 }
 
 panel_args Captures(u32 _captures) {
    panel_args result = {};
-   result._captures = _captures;
-   return result;
+   return result.Captures(_captures);
 }
 
 #define Panel(...) _Panel(GEN_UI_ID, __VA_ARGS__)
@@ -712,22 +758,23 @@ element *_StackPanel(ui_id id, element *parent, rect2 bounds, panel_args args = 
 }
 //--------------------------------------------------------
 
+//TODO: text colour, maybe redo optional params like we did for other stuff
 #define Label(...) _Label(GEN_UI_ID, __VA_ARGS__)
-element *_Label(ui_id id, element *parent, string text, f32 line_height, v2 p = V2(0, 0),
-                v2 margin = V2(0, 0)) 
+element *_Label(ui_id id, element *parent, string text, f32 line_height, v4 text_colour, 
+                v2 p = V2(0, 0), v2 m = V2(0, 0)) 
 {
    UIContext *context = parent->context;
    f32 width = TextWidth(context->font, text, line_height);
 
-   element *result = _Panel(id, parent, V2(width, line_height), Padding(p).Margin(margin));
-   Text(result, text, result->bounds.min, line_height);
+   element *result = _Panel(id, parent, V2(width, line_height), Padding(p).Margin(m));
+   Text(result, text, result->bounds.min, line_height, text_colour);
    return result;
 }
 
-element *_Label(ui_id id, element *parent, char *text, f32 line_height, v2 padding = V2(0, 0),
-                v2 margin = V2(0, 0)) 
+element *_Label(ui_id id, element *parent, char *text, f32 line_height, v4 text_colour,
+                v2 p = V2(0, 0), v2 m = V2(0, 0)) 
 {
-   return _Label(id, parent, Literal(text), line_height, padding, margin);
+   return _Label(id, parent, Literal(text), line_height, text_colour, p, m);
 }
 
 //Persistent-Data-------------------------------------------------

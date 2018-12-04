@@ -170,6 +170,7 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
 
    button_style control_button_style = ButtonStyle(V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
                                                    V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
+                                                   BLACK,
                                                    30, V2(0, 0), V2(5, 5));
    
    if(_Button(id + GEN_UI_ID, control_row, "Clear", control_button_style).clicked) {
@@ -262,14 +263,14 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
    }
 
    if(IsHot(graph)) {
-      Label(graph, Concat(Literal("time = "), ToString(cursor_t)), 20, V2(5, 5));
+      Label(graph, Concat(Literal("time = "), ToString(cursor_t)), 20, BLACK, V2(5, 5));
       for(LineGraph *curr_graph = data->first; curr_graph; curr_graph = curr_graph->next) {
          string prefix = Literal(curr_graph->hidden ? "- " : "+ ");
          f32 value = GetValueAt(curr_graph, cursor_t);
          Assert(curr_graph->unit_id < ArraySize(data->units));
          string suffix = (curr_graph->unit_id == 0) ? Literal("") : data->units[curr_graph->unit_id].suffix;
          string text = Concat(prefix, curr_graph->name, Literal(" = "), ToString(value), suffix); 
-         Label(graph, text, 20);
+         Label(graph, text, 20, BLACK);
       }
    }
 }

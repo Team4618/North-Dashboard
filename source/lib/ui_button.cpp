@@ -3,8 +3,7 @@ enum button_visual_flags {
    BUTTON_SELECTED = (1 << 1)
 };
 
-//TODO: button corner styles
-//TODO: text colour
+//TODO: text padding
 struct button_style {
    v4 colour;
    v4 selected_colour;
@@ -12,6 +11,8 @@ struct button_style {
    v4 outline;
    v4 hot_outline;
    v4 active_outline;
+
+   v4 text_colour;
 
    f32 height;
    v2 padding;
@@ -34,6 +35,7 @@ struct button_style {
 
 button_style ButtonStyle(v4 colour, v4 selected_colour, 
                          v4 outline, v4 hot_outline, v4 active_outline, 
+                         v4 text_colour,
                          f32 height, v2 padding, v2 margin) {
    button_style result = {};
    result.colour = colour;
@@ -43,6 +45,8 @@ button_style ButtonStyle(v4 colour, v4 selected_colour,
    result.hot_outline = hot_outline;
    result.active_outline = active_outline;
    
+   result.text_colour = text_colour;
+
    result.height = height;
    result.padding = padding;
    result.margin = margin;
@@ -54,6 +58,9 @@ struct ui_button {
    bool clicked;
 };
 
+//TODO: icons in buttons
+// Should we just make buttons a layout and put elements inside them (eg. labels, icons)?
+
 #define Button(...) _Button(GEN_UI_ID, __VA_ARGS__)
 ui_button _Button(ui_id id, element *parent, string text, button_style style) {
    UIContext *context = parent->context;
@@ -63,7 +70,7 @@ ui_button _Button(ui_id id, element *parent, string text, button_style style) {
    element *e = _Panel(id, parent, V2(width, style.height), Padding(style.padding).Margin(style.margin).Captures(interaction));
    
    Background(e, (style.flags & BUTTON_SELECTED) ? style.selected_colour : style.colour);
-   Text(e, text, e->bounds.min, Size(e->bounds).y);
+   Text(e, text, e->bounds.min, Size(e->bounds).y, style.text_colour);
    
    if(IsActive(e)) {
       Outline(e, style.active_outline);

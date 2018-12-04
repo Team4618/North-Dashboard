@@ -18,7 +18,6 @@ ui_checkbox _CheckBox(ui_id id, element *parent, bool checked,
    return result;
 }
 
-//TODO: one frame delay here, fix
 ui_checkbox _CheckBox(ui_id id, element *parent, u32 *value, u32 flag,
                       v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0))
 {

@@ -120,124 +120,142 @@ void deleteTexture(texture tex) {
       glDeleteTextures(1, &tex.handle); 
 }
 
-// glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
-//    if(font->glyphs[codepoint] == NULL) {
-//       glyph_texture *new_glyph = PushStruct(&font->arena, glyph_texture);
-//       new_glyph->codepoint = codepoint;
+glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
+   if(font->glyphs[codepoint] == NULL) {
+      glyph_texture *new_glyph = PushStruct(&font->arena, glyph_texture);
+      new_glyph->codepoint = codepoint;
       
-//       u32 size = 128;
-//       u32 miplevel = 0;      
-//       s32 w, h;
-//       u8 *mono = stbtt_GetCodepointBitmap(&font->fontinfo, 0, stbtt_ScaleForPixelHeight(&font->fontinfo, 20), c, &w, &h, 0, 0);
-//       //TODO: free texels
-//       u32 
-
-//       GLuint handle = 0;
-//       glCreateTextures(GL_TEXTURE_2D, 1, &handle);
-//       glTextureStorage2D(handle, 1, GL_RGBA8, size, size);
-//       glTextureSubImage2D(handle, miplevel, 0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE, texels);
-//       glTextureParameteri(handle, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-//       glTextureParameteri(handle, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      // u32 size = 128;
+      u32 miplevel = 0;  
+      f32 line_height = 100;    
+      s32 w, h;
+      u8 *mono = stbtt_GetCodepointBitmap(&font->fontinfo, 0, stbtt_ScaleForPixelHeight(&font->fontinfo, line_height), codepoint, &w, &h, 0, 0);
+      u32 *rgba = PushTempArray(u32, w * h); //TODO: move to scoped temp memory when thats a thing
       
-//       new_glyph->tex.size = V2(size, size);
-//       new_glyph->tex.handle = handle;
-//    }
+      u8 *mono_curr = mono;
+      u32 *rgba_curr = rgba;
+      for(u32 y = 0; y < h; y++) {
+         for(u32 x = 0; x < w; x++) {
+            u32 mono_val = *mono_curr;
+            *rgba_curr = (mono_val << 0) | (mono_val << 8) | (mono_val << 16) | (mono_val << 24);
+            
+            mono_curr++;
+            rgba_curr++;
+         }  
+      }
+      stbtt_FreeBitmap(mono, 0);
 
-//    return font->glyphs[codepoint];
-// }
+      GLuint handle = 0;
+      glCreateTextures(GL_TEXTURE_2D, 1, &handle);
+      glTextureStorage2D(handle, 1, GL_RGBA8, w, h);
+      glTextureSubImage2D(handle, miplevel, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+      glTextureParameteri(handle, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTextureParameteri(handle, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      
+      new_glyph->tex.size = V2(w, h);
+      new_glyph->tex.handle = handle;
+      new_glyph->size_over_line_height = V2(w, h) / line_height;
+      //TODO: load glyph horizontal metrics
+
+      font->glyphs[codepoint] = new_glyph;
+   }
+
+   return font->glyphs[codepoint];
+}
 
 loaded_font loadFont(buffer ttf_file, MemoryArena arena) {
    loaded_font result = {};
    result.arena = arena;
    stbtt_InitFont(&result.fontinfo, ttf_file.data, 
                   stbtt_GetFontOffsetForIndex(ttf_file.data, 0));
+   //TODO: load font vertical metrics
    return result;
 }
 
-sdfFont loadFont(char *metaPath, char *texturePath) {
-   sdfFont result = {};
-   result.sdfTexture = loadTexture(texturePath, true);
+// sdfFont loadFont(char *metaPath, char *texturePath) {
+//    sdfFont result = {};
+//    result.sdfTexture = loadTexture(texturePath, true);
    
-   buffer fontMeta = ReadEntireFile(metaPath, true);
-   lexer metadata = { (char *) fontMeta.data };
+//    buffer fontMeta = ReadEntireFile(metaPath, true);
+//    lexer metadata = { (char *) fontMeta.data };
    
-   bool parsing = true;
-   while(parsing) {
-      token tkn = GetToken(&metadata);
+//    bool parsing = true;
+//    while(parsing) {
+//       token tkn = GetToken(&metadata);
       
-      if(tkn.type == Token_End) {
-         parsing = false;
-      } else if(TokenIdentifier(tkn, Literal("char"))) {
-         u32 id = 0;
-         s32 x = 0;
-         s32 y = 0;
-         s32 width = 0;
-         s32 height = 0;
-         s32 xoffset = 0;
-         s32 yoffset = 0;
-         s32 xadvance = 0;
+//       if(tkn.type == Token_End) {
+//          parsing = false;
+//       } else if(TokenIdentifier(tkn, Literal("char"))) {
+//          u32 id = 0;
+//          s32 x = 0;
+//          s32 y = 0;
+//          s32 width = 0;
+//          s32 height = 0;
+//          s32 xoffset = 0;
+//          s32 yoffset = 0;
+//          s32 xadvance = 0;
          
-         while(true) {
-            token first = GetToken(&metadata);
+//          while(true) {
+//             token first = GetToken(&metadata);
             
-            if(first.type == Token_NewLine) {
-               break;
-            } else if(TokenIdentifier(first, Literal("id"))) {
-               GetToken(&metadata); //Should always be =
-               id = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("x"))) {
-               GetToken(&metadata); //Should always be =
-               x = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("y"))) {
-               GetToken(&metadata); //Should always be =
-               y = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("width"))) {
-               GetToken(&metadata); //Should always be =
-               width = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("height"))) {
-               GetToken(&metadata); //Should always be =
-               height = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("xoffset"))) {
-               GetToken(&metadata); //Should always be =
-               xoffset = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("yoffset"))) {
-               GetToken(&metadata); //Should always be =
-               yoffset = ParseS32(&metadata);
-            } else if(TokenIdentifier(first, Literal("xadvance"))) {
-               GetToken(&metadata); //Should always be =
-               xadvance = ParseS32(&metadata);
-            }
-         }
+//             if(first.type == Token_NewLine) {
+//                break;
+//             } else if(TokenIdentifier(first, Literal("id"))) {
+//                GetToken(&metadata); //Should always be =
+//                id = ParseS32(&metadata);
+//             } else if(TokenIdentifier(first, Literal("x"))) {
+//                GetToken(&metadata); //Should always be =
+//                x = ParseS32(&metadata);
+//             } else if(TokenIdentifier(first, Literal("y"))) {
+//                GetToken(&metadata); //Should always be =
+//                y = ParseS32(&metadata);
+//             } else if(TokenIdentifier(first, Literal("width"))) {
+//                GetToken(&metadata); //Should always be =
+//                width = ParseS32(&metadata);
+//             } else if(TokenIdentifier(first, Literal("height"))) {
+//                GetToken(&metadata); //Should always be =
+//                height = ParseS32(&metadata);
+//             } else if(TokenIdentifier(first, Literal("xoffset"))) {
+//                GetToken(&metadata); //Should always be =
+//                xoffset = ParseS32(&metadata);
+//             } else if(TokenIdentifier(first, Literal("yoffset"))) {
+//                GetToken(&metadata); //Should always be =
+//                yoffset = ParseS32(&metadata);
+//             } else if(TokenIdentifier(first, Literal("xadvance"))) {
+//                GetToken(&metadata); //Should always be =
+//                xadvance = ParseS32(&metadata);
+//             }
+//          }
          
-         if(id < ArraySize(result.glyphs)) {
-            glyphInfo glyph = {};
-            glyph.textureLocation = V2(x, y);
-            glyph.size = V2(width, height);
-            glyph.offset = V2(xoffset, yoffset);
-            glyph.xadvance = xadvance;
-            result.glyphs[id] = glyph;
+//          if(id < ArraySize(result.glyphs)) {
+//             glyphInfo glyph = {};
+//             glyph.textureLocation = V2(x, y);
+//             glyph.size = V2(width, height);
+//             glyph.offset = V2(xoffset, yoffset);
+//             glyph.xadvance = xadvance;
+//             result.glyphs[id] = glyph;
 
-            result.max_char_width = Max(result.max_char_width, width);
-         }
-      } else if(TokenIdentifier(tkn, Literal("common"))) {
-         while(true) {
-            token first = GetToken(&metadata);
+//             result.max_char_width = Max(result.max_char_width, width);
+//          }
+//       } else if(TokenIdentifier(tkn, Literal("common"))) {
+//          while(true) {
+//             token first = GetToken(&metadata);
             
-            if(first.type == Token_NewLine) {
-               break;
-            } else if(TokenIdentifier(first, Literal("lineHeight"))) {
-               GetToken(&metadata); //Should always be =
-               result.native_line_height = ParseS32(&metadata);
-            }
-         }
-      } else if(TokenIdentifier(tkn, Literal("info"))) {
+//             if(first.type == Token_NewLine) {
+//                break;
+//             } else if(TokenIdentifier(first, Literal("lineHeight"))) {
+//                GetToken(&metadata); //Should always be =
+//                result.native_line_height = ParseS32(&metadata);
+//             }
+//          }
+//       } else if(TokenIdentifier(tkn, Literal("info"))) {
          
-      }
-   }
+//       }
+//    }
    
-   FreeEntireFile(&fontMeta);
-   return result;
-}
+//    FreeEntireFile(&fontMeta);
+//    return result;
+// }
 
 GLuint loadShader(char *path, GLenum shaderType) {
    buffer shader_src = ReadEntireFile(path, true);
@@ -329,9 +347,37 @@ openglContext gl = {};
 
 struct ui_impl_win32_window {
    HWND handle;
+   bool running;
 };
 
-ui_impl_win32_window createWindow(char *title, WNDPROC window_proc) {
+LRESULT CALLBACK impl_WindowMessageEvent(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+   switch(message)
+	{
+		case WM_CLOSE:
+			DestroyWindow(window);
+         break;
+		
+		case WM_DESTROY:
+			PostQuitMessage(0);
+         break;
+        
+      case WM_SIZE:
+      {
+         RECT client_rect = {};
+         GetClientRect(window, &client_rect);
+         window_size = V2(client_rect.right, client_rect.bottom);
+         glViewport(0, 0, window_size.x, window_size.y);
+      } break;
+
+      case WM_TOUCH: {
+         OutputDebugStringA("Callback Touch\n");
+      } break;
+	}
+   
+   return DefWindowProc(window, message, wParam, lParam);
+}
+
+ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_WindowMessageEvent) {
    HINSTANCE hInstance = GetModuleHandle(NULL);
    
    WNDCLASSEX window_class = {};
@@ -466,8 +512,15 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc) {
    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
    glEnable(GL_SCISSOR_TEST);
 
+   DragAcceptFiles(window, true);
+   RegisterTouchWindow(window, 0);
+
+   ShowWindow(window, SW_SHOWNORMAL);
+   UpdateWindow(window);
+
    ui_impl_win32_window result = {};
    result.handle = window; 
+   result.running = true;
    return result;
 }
 
@@ -592,9 +645,174 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
 void DrawElement(element *e, mat4 transform, openglContext *gl) {
    DrawRenderCommandBuffer(e->first_command, e->cliprect, transform, gl);
 
+   //TODO: draw boxes for interaction captures
+
    uiTick(e);
 
    for(element *child = e->first_child; child; child = child->next) {
       DrawElement(child, transform, gl);
    }
+}
+
+bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
+   InputState *input = &ui->input_state;
+   POINT cursor = {};
+   GetCursorPos(&cursor);
+   ScreenToClient(window->handle, &cursor);
+   
+   input->last_pos = input->pos;
+   input->pos = V2(cursor.x, cursor.y);
+   input->vscroll = 0;
+   input->hscroll = 0;
+
+   input->left_up = false;
+   input->right_up = false;
+
+   input->key_char = 0;
+   input->key_backspace = false;
+   input->key_enter = false;
+   input->key_up_arrow = false;
+   input->key_down_arrow = false;
+   input->key_left_arrow = false;
+   input->key_right_arrow = false;
+
+   MSG msg = {};
+   while(PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+      switch(msg.message) {
+         case WM_QUIT:
+            window->running = false;
+            break;
+      
+         case WM_LBUTTONUP:
+            input->left_down = false;
+            input->left_up = true;
+            break;
+      
+         case WM_LBUTTONDOWN:
+            input->left_down = true;
+            input->left_up = false;
+            break;
+            
+         case WM_RBUTTONUP:
+            input->right_down = false;
+            input->right_up = true;
+            break;
+      
+         case WM_RBUTTONDOWN:
+            input->right_down = true;
+            input->right_up = false;
+            break;   
+
+         case WM_CHAR: {
+            switch(msg.wParam) {
+               case 0x08:
+                  input->key_backspace = true;
+                  break;
+               case 0x0D:
+                  input->key_enter = true;
+                  break;
+               case 0x0A:  // linefeed 
+               case 0x1B:  // escape 
+               case 0x09:  // tab 
+                  break;
+               default:
+                  input->key_char = (char) msg.wParam;
+                  break;
+            }
+         } break;
+
+         case WM_KEYDOWN: {
+            switch(msg.wParam) {
+               case VK_UP:
+                  input->key_up_arrow = true;
+                  break;
+               case VK_DOWN:
+                  input->key_down_arrow = true;
+                  break;
+               case VK_LEFT:
+                  input->key_left_arrow = true;
+                  break;
+               case VK_RIGHT:
+                  input->key_right_arrow = true;
+                  break;
+            }
+         } break;
+
+         //TODO: touch compatable stuff
+
+         case WM_MOUSEWHEEL: {
+            input->vscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
+         } break;
+
+         case WM_MOUSEHWHEEL: {
+            input->hscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
+         } break;
+
+         //TODO: touch compatability
+         //https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-registertouchwindow
+         case WM_TOUCH: {
+            OutputDebugStringA("Loop Touch\n");
+         } break;
+
+         case WM_DROPFILES: {
+            HDROP drop = (HDROP) msg.wParam;
+            MemoryArena *arena = &ui->filedrop_arena;
+            
+            u32 file_count = DragQueryFileA(drop, 0xFFFFFFFF, NULL, 0);
+            string *files = PushArray(arena, string, file_count);
+
+            for(u32 i = 0; i < file_count; i++) {
+               u32 size = DragQueryFileA(drop, i, NULL, 0);
+               string *file = files + i;
+               
+               *file = String(PushArray(arena, char, size), size);
+               DragQueryFileA(drop, i, file->text, size);
+            }
+            DragFinish(drop);
+
+            ui->filedrop_count = file_count;
+            ui->filedrop_names = files;
+         } break;
+
+         default: {
+            string msg_name;
+            switch(msg.message) {
+               case 275: {
+                  msg_name = Literal("Timer");
+               } break;
+
+               case 512: {
+                  msg_name = Literal("Mouse move");
+               } break;
+
+               default: {
+                  msg_name = ToString(msg.message);
+               } break;
+            }
+
+            string text = Concat(Literal("Unhandled Message "), msg_name, Literal("\n"));
+            // OutputDebugStringA(ToCString(text));
+         } break;
+      }
+      
+      TranslateMessage(&msg);
+      DispatchMessageA(&msg);
+   }
+   
+   return window->running;
+}
+
+void endFrame(element *root) {
+   Reset(&root->context->filedrop_arena);
+   
+   glScissor(0, 0, window_size.x, window_size.y);
+   glClearColor(1, 1, 1, 1);
+   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+   mat4 transform = Orthographic(0, window_size.y, 0, window_size.x, 100, -100);
+   DrawElement(root, transform, &gl);
+   
+   //TODO: draw frame counter & what elements currently captured the interactions 
+
+   SwapBuffers(gl.dc);
 }
