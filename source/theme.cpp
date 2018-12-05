@@ -10,12 +10,10 @@ button_style menu_button = ButtonStyle(
    light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
    off_white,
    40, V2(0, 0), V2(0, 0));
-sdfFont font;
 texture logoTexture;
 loaded_font test_font;
 
 void initTheme() {
-   //font = loadFont("font.fnt", "font.png");
    logoTexture = loadTexture("logo.png", true);
    test_font = loadFont(ReadEntireFile("OpenSans-Regular.ttf", true), 
                         PlatformAllocArena(Megabyte(5)));

@@ -3,26 +3,12 @@ struct texture {
    GLuint handle;
 };
 
-struct glyphInfo {
-   v2 textureLocation;
-   v2 size;
-   v2 offset;
-   f32 xadvance;
-};
-
-//TODO: load fonts from a ttf using stb_truetype 
-struct sdfFont {
-   texture sdfTexture;
-   f32 native_line_height;
-   f32 max_char_width;
-   glyphInfo glyphs[128];
-};
-
-//---------------------------
 struct glyph_texture {
    u32 codepoint;
    texture tex;
    v2 size_over_line_height;
+   f32 xadvance_over_line_height;
+   f32 ascent_over_line_height;
 };
 
 struct loaded_font {
@@ -30,11 +16,8 @@ struct loaded_font {
    glyph_texture *glyphs[128];
    stbtt_fontinfo fontinfo;
 
-   f32 ascent;
-   f32 descent;
-   f32 line_gap;
+   f32 baseline_from_top_over_line_height;
 };
-//---------------------------
 
 enum RenderCommandType {
    RenderCommand_SDF,
@@ -139,12 +122,10 @@ struct persistent_hash_link {
    u8 *data;
 };
 
-//TODO: debugging mode stuff
 struct element;
 struct UIContext {
-   sdfFont *font;
    MemoryArena frame_arena;
-   
+
    MemoryArena persistent_arena;
    persistent_hash_link *persistent_hash[128];
   
@@ -185,6 +166,9 @@ struct UIContext {
    f32 fps;
 
    ui_id scope_id;
+
+   bool debug_mode;
+   element *debug_hot_e;
 
    //below will probably get rewritten   
    InputState input_state;
@@ -271,6 +255,8 @@ element *beginFrame(v2 window_size, UIContext *context, f32 dt) {
    context->dt = dt;
    context->fps = 1.0 / dt;
 
+   context->debug_hot_e = NULL;
+
    Reset(&context->frame_arena);
    element *root = PushStruct(&context->frame_arena, element);
    root->context = context;
@@ -345,93 +331,71 @@ RenderCommand *Texture(element *e, texture tex, rect2 bounds) {
    return result;
 }
 
-f32 TextWidth(sdfFont *font, string text, f32 line_height) {   
-   f32 width = 0;
-   f32 scale = line_height / font->native_line_height;
-
-   for(u32 i = 0; i < text.length; i++) {
-      u32 id = (u32) text.text[i];
-      
-      if(id < ArraySize(font->glyphs)) {
-         glyphInfo glyph = font->glyphs[id];
-               
-         width += scale * glyph.xadvance;
-      }
-   }
-
-   return width;
-}
-
-f32 GetMaxCharWidth(sdfFont *font, f32 line_height) {
-   f32 scale = line_height / font->native_line_height;
-   return font->max_char_width * scale;      
-}
-
-rect2 GetCharBounds(sdfFont *font, string text, u32 char_i, v2 pos, f32 line_height) {
-   f32 scale = line_height / font->native_line_height;
-   
-   for(u32 i = 0; i < text.length; i++) {
-      u32 id = (u32) text.text[i];
-      
-      if(id < ArraySize(font->glyphs)) {
-         glyphInfo glyph = font->glyphs[id];
-         f32 width = scale * glyph.size.x;
-         f32 height = scale * glyph.size.y; 
-
-         if(i == char_i) {
-            return RectMinSize((scale * glyph.offset) + pos, V2(width, height));
-         }
-
-         pos = pos + V2(scale * glyph.xadvance, 0);
-      }
-   }
-
-   return RectMinSize(V2(0, 0), V2(0, 0));
-}
-
-//TODO: kerning
-// void Text(element *e, string text, v2 pos, f32 line_height, v4 colour = V4(0, 0, 0, 1)) {   
-//    UIContext *context = e->context;
-//    sdfFont *font = context->font;
-//    f32 scale = line_height / font->native_line_height;
-   
-//    for(u32 i = 0; i < text.length; i++) {
-//       u32 id = (u32) text.text[i];
-      
-//       if(id < ArraySize(font->glyphs)) {
-//          glyphInfo glyph = font->glyphs[id];
-//          f32 width = scale * glyph.size.x;
-//          f32 height = scale * glyph.size.y; 
-
-//          RenderCommand *command = PushStruct(&context->frame_arena, RenderCommand);
-//          command->type = RenderCommand_SDF;
-//          command->next = NULL;
-//          command->drawSDF.bounds = RectMinSize((scale * glyph.offset) + pos, 
-//                                                V2(width, height));
-//          command->drawSDF.uvBounds = RectMinSize(glyph.textureLocation, glyph.size);
-//          command->drawSDF.sdf = font->sdfTexture;
-//          command->drawSDF.colour = colour;
-         
-//          addCommand(e, command);
-//          pos = pos + V2(scale * glyph.xadvance, 0);
-//       }
-//    }
-// }
-
 extern loaded_font test_font;
 glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint);
 
+struct ui_glyph_layout {
+   glyph_texture *glyph_tex;
+   rect2 bounds;
+};
+
+struct ui_text_layout {
+   u32 glyph_count;
+   ui_glyph_layout *glyphs;
+   f32 baseline;
+   rect2 text_bounds;
+};
+
+//TODO: kerning
+ui_text_layout LayoutText(UIContext *context, string text, f32 line_height) {
+   ui_text_layout result = {};
+   result.baseline = test_font.baseline_from_top_over_line_height * line_height;
+   result.glyph_count = text.length;
+   result.glyphs = PushTempArray(ui_glyph_layout, text.length);
+
+   f32 x = 0;
+   for(u32 i = 0; i < text.length; i++) {
+      ui_glyph_layout *glyph_layout = result.glyphs + i;
+      glyph_texture *glyph = getOrLoadGlyph(&test_font, text.text[i]);
+      
+      v2 size = line_height * glyph->size_over_line_height;
+      f32 xadvance = line_height * glyph->xadvance_over_line_height;
+      f32 ascent = line_height * glyph->ascent_over_line_height;
+      v2 glyph_pos = V2(x, result.baseline + ascent);
+
+      glyph_layout->bounds = RectMinSize(glyph_pos, size);
+      glyph_layout->glyph_tex = glyph;
+
+      x += xadvance;
+   }
+   result.text_bounds = RectMinSize(V2(0, 0), V2(x, line_height));
+
+   return result;
+}
+
+f32 TextWidth(UIContext *context, string text, f32 line_height) {   
+   return Size(LayoutText(context, text, line_height).text_bounds).x;
+}
+
+rect2 GetCharBounds(UIContext *context, string text, u32 i, v2 pos, f32 line_height) {
+   ui_text_layout layed_out_text = LayoutText(context, text, line_height);
+   return pos + layed_out_text.glyphs[i].bounds;
+}
+
 void Text(element *e, string text, v2 pos, f32 line_height, v4 colour) {   
    UIContext *context = e->context;
-   
-   for(u32 i = 0; i < text.length; i++) {
-      glyph_texture *glyph = getOrLoadGlyph(&test_font, text.text[i]);
-      v2 size = line_height * glyph->size_over_line_height;
+   ui_text_layout layed_out_text = LayoutText(context, text, line_height);
+
+   if(context->debug_mode) {
+      Line(e, pos + V2(0, layed_out_text.baseline), pos + V2(Size(layed_out_text.text_bounds).x, layed_out_text.baseline), V4(0, 0, 0, 1));
+      Outline(e, pos + layed_out_text.text_bounds, V4(0, 0, 0, 1));
+   }
+
+   for(u32 i = 0; i < layed_out_text.glyph_count; i++) {
+      ui_glyph_layout *glyph = layed_out_text.glyphs + i;
       
       //TODO: actually respect the text colour
-      Texture(e, glyph->tex, RectMinSize(pos, size));
-      Outline(e, RectMinSize(pos, size), V4(0, 0, 0, 1));
-      pos = pos + V2(size.x, 0);
+      Texture(e, glyph->glyph_tex->tex, pos + glyph->bounds);
    }
 }
 
@@ -531,7 +495,7 @@ ui_dropped_files GetDroppedFiles(element *e) {
 void uiTick(element *e) {
    UIContext *context = e->context;
    InputState *input = &context->input_state; 
-   
+
    if(e->captures & INTERACTION_HOT) {
       bool can_become_hot = (context->active_e == NULL_UI_ID) || (context->active_e == e->id);
       if(Contains(e->bounds, input->pos) && can_become_hot) {
@@ -582,6 +546,10 @@ void uiTick(element *e) {
       if(IsHot(e)) {
          context->new_filedrop_e = e->id;
       }
+   }
+
+   if(context->debug_mode && Contains(e->bounds, input->pos)) {
+      context->debug_hot_e = e;
    }
  }
 
@@ -764,7 +732,7 @@ element *_Label(ui_id id, element *parent, string text, f32 line_height, v4 text
                 v2 p = V2(0, 0), v2 m = V2(0, 0)) 
 {
    UIContext *context = parent->context;
-   f32 width = TextWidth(context->font, text, line_height);
+   f32 width = TextWidth(context, text, line_height);
 
    element *result = _Panel(id, parent, V2(width, line_height), Padding(p).Margin(m));
    Text(result, text, result->bounds.min, line_height, text_colour);

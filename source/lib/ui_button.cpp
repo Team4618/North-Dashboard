@@ -65,7 +65,7 @@ struct ui_button {
 ui_button _Button(ui_id id, element *parent, string text, button_style style) {
    UIContext *context = parent->context;
    InputState input = context->input_state;
-   f32 width = TextWidth(context->font, text, style.height);
+   f32 width = TextWidth(context, text, style.height);
    u32 interaction = (style.flags & BUTTON_DISABLED) ? 0 : INTERACTION_CLICK;
    element *e = _Panel(id, parent, V2(width, style.height), Padding(style.padding).Margin(style.margin).Captures(interaction));
    

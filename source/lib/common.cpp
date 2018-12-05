@@ -504,6 +504,13 @@ struct rect2 {
    v2 max;
 };
 
+rect2 operator+ (v2 offset, rect2 r) {
+	rect2 result = r;
+	result.min = result.min + offset;
+	result.max = result.max + offset;
+	return result;
+}
+
 inline rect2 RectMinSize(v2 min, v2 size) {
    rect2 result = {};
    
@@ -570,6 +577,8 @@ inline rect2 Overlap(rect2 a, rect2 b) {
    
    return result;
 }
+
+//TODO union
 
 union mat4 {
    f32 e[16];

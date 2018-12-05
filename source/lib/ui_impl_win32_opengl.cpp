@@ -125,11 +125,12 @@ glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
       glyph_texture *new_glyph = PushStruct(&font->arena, glyph_texture);
       new_glyph->codepoint = codepoint;
       
-      // u32 size = 128;
-      u32 miplevel = 0;  
       f32 line_height = 100;    
+      f32 scale = stbtt_ScaleForPixelHeight(&font->fontinfo, line_height);
+      
+      //NOTE: stb_truetype has SDF generation so we _could_ use that 
       s32 w, h;
-      u8 *mono = stbtt_GetCodepointBitmap(&font->fontinfo, 0, stbtt_ScaleForPixelHeight(&font->fontinfo, line_height), codepoint, &w, &h, 0, 0);
+      u8 *mono = stbtt_GetCodepointBitmap(&font->fontinfo, 0, scale, codepoint, &w, &h, 0, 0);
       u32 *rgba = PushTempArray(u32, w * h); //TODO: move to scoped temp memory when thats a thing
       
       u8 *mono_curr = mono;
@@ -148,14 +149,21 @@ glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
       GLuint handle = 0;
       glCreateTextures(GL_TEXTURE_2D, 1, &handle);
       glTextureStorage2D(handle, 1, GL_RGBA8, w, h);
-      glTextureSubImage2D(handle, miplevel, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+      glTextureSubImage2D(handle, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
       glTextureParameteri(handle, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
       glTextureParameteri(handle, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       
       new_glyph->tex.size = V2(w, h);
       new_glyph->tex.handle = handle;
       new_glyph->size_over_line_height = V2(w, h) / line_height;
-      //TODO: load glyph horizontal metrics
+      
+      s32 xadvance, left_side_bearing;
+      stbtt_GetCodepointHMetrics(&font->fontinfo, codepoint, &xadvance, &left_side_bearing);
+      s32 x0, y0, x1, y1;
+      stbtt_GetCodepointBox(&font->fontinfo, codepoint, &x0, &y0, &x1, &y1);
+
+      new_glyph->xadvance_over_line_height = (xadvance * scale) / line_height;
+      new_glyph->ascent_over_line_height = (-y1 * scale) / line_height;
 
       font->glyphs[codepoint] = new_glyph;
    }
@@ -168,94 +176,15 @@ loaded_font loadFont(buffer ttf_file, MemoryArena arena) {
    result.arena = arena;
    stbtt_InitFont(&result.fontinfo, ttf_file.data, 
                   stbtt_GetFontOffsetForIndex(ttf_file.data, 0));
-   //TODO: load font vertical metrics
+   
+   f32 line_height = 100;    
+   f32 scale = stbtt_ScaleForPixelHeight(&result.fontinfo, line_height);
+   s32 ascent, descent, lineGap;
+   stbtt_GetFontVMetrics(&result.fontinfo, &ascent, &descent, &lineGap);
+   result.baseline_from_top_over_line_height = (ascent * scale) / line_height;
+
    return result;
 }
-
-// sdfFont loadFont(char *metaPath, char *texturePath) {
-//    sdfFont result = {};
-//    result.sdfTexture = loadTexture(texturePath, true);
-   
-//    buffer fontMeta = ReadEntireFile(metaPath, true);
-//    lexer metadata = { (char *) fontMeta.data };
-   
-//    bool parsing = true;
-//    while(parsing) {
-//       token tkn = GetToken(&metadata);
-      
-//       if(tkn.type == Token_End) {
-//          parsing = false;
-//       } else if(TokenIdentifier(tkn, Literal("char"))) {
-//          u32 id = 0;
-//          s32 x = 0;
-//          s32 y = 0;
-//          s32 width = 0;
-//          s32 height = 0;
-//          s32 xoffset = 0;
-//          s32 yoffset = 0;
-//          s32 xadvance = 0;
-         
-//          while(true) {
-//             token first = GetToken(&metadata);
-            
-//             if(first.type == Token_NewLine) {
-//                break;
-//             } else if(TokenIdentifier(first, Literal("id"))) {
-//                GetToken(&metadata); //Should always be =
-//                id = ParseS32(&metadata);
-//             } else if(TokenIdentifier(first, Literal("x"))) {
-//                GetToken(&metadata); //Should always be =
-//                x = ParseS32(&metadata);
-//             } else if(TokenIdentifier(first, Literal("y"))) {
-//                GetToken(&metadata); //Should always be =
-//                y = ParseS32(&metadata);
-//             } else if(TokenIdentifier(first, Literal("width"))) {
-//                GetToken(&metadata); //Should always be =
-//                width = ParseS32(&metadata);
-//             } else if(TokenIdentifier(first, Literal("height"))) {
-//                GetToken(&metadata); //Should always be =
-//                height = ParseS32(&metadata);
-//             } else if(TokenIdentifier(first, Literal("xoffset"))) {
-//                GetToken(&metadata); //Should always be =
-//                xoffset = ParseS32(&metadata);
-//             } else if(TokenIdentifier(first, Literal("yoffset"))) {
-//                GetToken(&metadata); //Should always be =
-//                yoffset = ParseS32(&metadata);
-//             } else if(TokenIdentifier(first, Literal("xadvance"))) {
-//                GetToken(&metadata); //Should always be =
-//                xadvance = ParseS32(&metadata);
-//             }
-//          }
-         
-//          if(id < ArraySize(result.glyphs)) {
-//             glyphInfo glyph = {};
-//             glyph.textureLocation = V2(x, y);
-//             glyph.size = V2(width, height);
-//             glyph.offset = V2(xoffset, yoffset);
-//             glyph.xadvance = xadvance;
-//             result.glyphs[id] = glyph;
-
-//             result.max_char_width = Max(result.max_char_width, width);
-//          }
-//       } else if(TokenIdentifier(tkn, Literal("common"))) {
-//          while(true) {
-//             token first = GetToken(&metadata);
-            
-//             if(first.type == Token_NewLine) {
-//                break;
-//             } else if(TokenIdentifier(first, Literal("lineHeight"))) {
-//                GetToken(&metadata); //Should always be =
-//                result.native_line_height = ParseS32(&metadata);
-//             }
-//          }
-//       } else if(TokenIdentifier(tkn, Literal("info"))) {
-         
-//       }
-//    }
-   
-//    FreeEntireFile(&fontMeta);
-//    return result;
-// }
 
 GLuint loadShader(char *path, GLenum shaderType) {
    buffer shader_src = ReadEntireFile(path, true);
@@ -343,16 +272,20 @@ struct openglContext {
    GLuint buffers[3];
 };
 
-openglContext gl = {};
 
 struct ui_impl_win32_window {
    HWND handle;
    bool running;
+   openglContext gl;
+   v2 size;
 };
 
+//NOTE: these globals are so we can work around the windows callback thing being a nightmare
+bool wm_size_recieved = false;
+//touch event stuff
+
 LRESULT CALLBACK impl_WindowMessageEvent(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-   switch(message)
-	{
+   switch(message) {
 		case WM_CLOSE:
 			DestroyWindow(window);
          break;
@@ -361,16 +294,14 @@ LRESULT CALLBACK impl_WindowMessageEvent(HWND window, UINT message, WPARAM wPara
 			PostQuitMessage(0);
          break;
         
-      case WM_SIZE:
-      {
-         RECT client_rect = {};
-         GetClientRect(window, &client_rect);
-         window_size = V2(client_rect.right, client_rect.bottom);
-         glViewport(0, 0, window_size.x, window_size.y);
+      case WM_SIZE: {
+         wm_size_recieved = true;
       } break;
 
       case WM_TOUCH: {
          OutputDebugStringA("Callback Touch\n");
+         //TODO: touch compatability
+         //https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-registertouchwindow
       } break;
 	}
    
@@ -396,6 +327,7 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
                                  CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL,
                                  hInstance, NULL);
    
+   openglContext gl = {};
    gl.dc = GetDC(window);
    
    PIXELFORMATDESCRIPTOR pixel_format = {sizeof(pixel_format), 1};
@@ -521,11 +453,12 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    ui_impl_win32_window result = {};
    result.handle = window; 
    result.running = true;
+   result.gl = gl;
    return result;
 }
 
 void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 transform, openglContext *gl) {
-   glScissor(bounds.min.x, window_size.y - bounds.max.y, Size(bounds).x, Size(bounds).y);
+   // glScissor(bounds.min.x, window_size.y - bounds.max.y, Size(bounds).x, Size(bounds).y);
 
    for(RenderCommand *command = first_command; command; command = command->next) {
       switch(command->type) {
@@ -645,8 +578,10 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
 void DrawElement(element *e, mat4 transform, openglContext *gl) {
    DrawRenderCommandBuffer(e->first_command, e->cliprect, transform, gl);
 
-   //TODO: draw boxes for interaction captures
-
+   if(e->context->debug_mode) {
+      //TODO: draw boxes for interaction captures
+   }
+   
    uiTick(e);
 
    for(element *child = e->first_child; child; child = child->next) {
@@ -738,7 +673,13 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
             }
          } break;
 
-         //TODO: touch compatable stuff
+         case WM_KEYUP: {
+            switch(msg.wParam) {
+               case VK_F1:
+                  ui->debug_mode = !ui->debug_mode;
+                  break;
+            }
+         } break;
 
          case WM_MOUSEWHEEL: {
             input->vscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
@@ -746,12 +687,6 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
 
          case WM_MOUSEHWHEEL: {
             input->hscroll = GET_WHEEL_DELTA_WPARAM(msg.wParam);
-         } break;
-
-         //TODO: touch compatability
-         //https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-registertouchwindow
-         case WM_TOUCH: {
-            OutputDebugStringA("Loop Touch\n");
          } break;
 
          case WM_DROPFILES: {
@@ -799,20 +734,51 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
       DispatchMessageA(&msg);
    }
    
+   if(wm_size_recieved) {
+      RECT client_rect = {};
+      GetClientRect(window->handle, &client_rect);
+      window->size = V2(client_rect.right, client_rect.bottom);
+      glViewport(0, 0, window->size.x, window->size.y);
+      wm_size_recieved = false;
+   }
+
    return window->running;
 }
 
-void endFrame(element *root) {
-   Reset(&root->context->filedrop_arena);
+void endFrame(ui_impl_win32_window *window, element *root) {
+   UIContext *context = root->context;
+   Reset(&context->filedrop_arena);
    
-   glScissor(0, 0, window_size.x, window_size.y);
+   glScissor(0, 0, window->size.x, window->size.y);
    glClearColor(1, 1, 1, 1);
    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-   mat4 transform = Orthographic(0, window_size.y, 0, window_size.x, 100, -100);
-   DrawElement(root, transform, &gl);
+   mat4 transform = Orthographic(0, window->size.y, 0, window->size.x, 100, -100);
+   DrawElement(root, transform, &window->gl);
    
    //TODO: draw frame counter & what elements currently captured the interactions 
+   if(context->debug_mode) {
+      element *debug_root = PushStruct(&context->frame_arena, element);
+      debug_root->context = context;
+      debug_root->bounds = RectMinSize(V2(0, 0), window->size);
+      debug_root->cliprect = RectMinSize(V2(0, 0), window->size);
+      ColumnLayout(debug_root);
+      
+      Label(debug_root, Concat(Literal("Time: "), ToString((f32) context->curr_time)), 60, BLACK);
+      Label(debug_root, Concat(Literal("FPS: "), ToString((f32) context->fps)), 60, BLACK);
 
-   SwapBuffers(gl.dc);
+      //TODO: calculate this based on the sizes of the labels
+      rect2 background_bounds = RectMinSize(V2(0, 0), V2(400, 400));
+      Rectangle(debug_root, background_bounds, V4(0, 0, 0, 0.75));
+      
+      if(context->debug_hot_e != NULL) {
+         string hot_e_loc = Literal(context->debug_hot_e->id.loc);
+         Label(debug_root, Concat(Literal("Mousing Over "), hot_e_loc), 30, BLACK);
+         Outline(debug_root, context->debug_hot_e->bounds, BLACK, 5);
+      }
+
+      DrawElement(debug_root, transform, &window->gl);
+   }
+
+   SwapBuffers(window->gl.dc);
 }

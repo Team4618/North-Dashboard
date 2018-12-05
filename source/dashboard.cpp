@@ -508,9 +508,7 @@ void DrawUI(element *root, DashboardState *state) {
    } else {
       Label(status_bar, "No Robot", 20, BLACK, V2(5, 0));
    }
-   Label(status_bar, Concat(Literal("Time: "), ToString((f32) root->context->curr_time)), 20, BLACK, V2(10, 0));
-   Label(status_bar, Concat(Literal("FPS: "), ToString((f32) root->context->fps)), 20, BLACK, V2(10, 0));
-
+   
    element *page_tabs = RowPanel(root, V2(Size(root).x, page_tab_height));
    Background(page_tabs, dark_grey);
    PageButton(page_tabs, "Home", DashboardPage_Home, state);

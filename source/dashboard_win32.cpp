@@ -23,8 +23,6 @@
 #include "lib/ui_field_topdown.cpp"
 #include "lib/ui_misc_utils.cpp"
 
-#include "string_and_lexer.cpp"
-v2 window_size = V2(0, 0);
 #include "lib/ui_impl_win32_opengl.cpp"
 
 #include "dashboard.cpp"
@@ -91,7 +89,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    ui_context.frame_arena = PlatformAllocArena(Megabyte(2));
    ui_context.persistent_arena = PlatformAllocArena(Megabyte(2));
    ui_context.filedrop_arena = PlatformAllocArena(Megabyte(2));
-   ui_context.font = &font;
    
    DashboardState state = {};
    initDashboard(&state);   
@@ -204,9 +201,9 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 
       Reset(&__temp_arena);
       
-      element *root_element = beginFrame(window_size, &ui_context, dt);
+      element *root_element = beginFrame(window.size, &ui_context, dt);
       DrawUI(root_element, &state);
-      endFrame(root_element);
+      endFrame(&window, root_element);
    }
    
    return 0;
