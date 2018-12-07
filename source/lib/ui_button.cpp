@@ -66,15 +66,15 @@ ui_button _Button(ui_id id, element *parent, string text, button_style style) {
    UIContext *context = parent->context;
    InputState input = context->input_state;
    f32 width = TextWidth(context, text, style.height);
-   u32 interaction = (style.flags & BUTTON_DISABLED) ? 0 : INTERACTION_CLICK;
-   element *e = _Panel(id, parent, V2(width, style.height), Padding(style.padding).Margin(style.margin).Captures(interaction));
-   
+   element *e = _Panel(id, parent, V2(width, style.height), Padding(style.padding).Margin(style.margin).Captures(INTERACTION_CLICK));
+   bool disabled = style.flags & BUTTON_DISABLED;
+
    Background(e, (style.flags & BUTTON_SELECTED) ? style.selected_colour : style.colour);
    Text(e, text, e->bounds.min, Size(e->bounds).y, style.text_colour);
    
-   if(IsActive(e)) {
+   if(IsActive(e) && !disabled) {
       Outline(e, style.active_outline);
-   } else if(IsHot(e)) {
+   } else if(IsHot(e) && !disabled) {
       Outline(e, style.hot_outline);
    } else {
       Outline(e, style.outline);
@@ -82,7 +82,7 @@ ui_button _Button(ui_id id, element *parent, string text, button_style style) {
 
    ui_button result = {};
    result.e = e;
-   result.clicked = WasClicked(e);
+   result.clicked = WasClicked(e) && !disabled;
    return result;
 }
 

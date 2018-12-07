@@ -1,7 +1,22 @@
+struct image {
+   u32 *texels;
+   u32 width;
+   u32 height;
+   bool valid;
+};
+
+image ReadImage(char *path, bool in_exe_directory = false);
+image ReadImage(string path, bool in_exe_directory = false);
+void FreeImage(image *i);
+
 struct texture {
    v2 size;
    GLuint handle;
 };
+
+texture loadTexture(char *path, bool in_exe_directory = false);
+texture createTexture(u32 *texels, u32 width, u32 height);
+void deleteTexture(texture tex);
 
 struct glyph_texture {
    u32 codepoint;
@@ -18,6 +33,9 @@ struct loaded_font {
 
    f32 baseline_from_top_over_line_height;
 };
+
+extern loaded_font test_font; //TODO: get rid of this
+glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint);
 
 enum RenderCommandType {
    RenderCommand_SDF,
@@ -42,6 +60,7 @@ struct RenderCommand {
          rect2 bounds;
          rect2 uvBounds; //NOTE: specified in texture space, not 0 to 1
          texture tex; 
+         v4 colour;
       } drawTexture;
       
       struct {
@@ -51,16 +70,13 @@ struct RenderCommand {
       
       struct {
          v4 colour;
-         v2 a;
-         v2 b;
          f32 thickness;
+         u32 point_count;
+         v2 *points;
+         bool closed;
       } drawLine;
    };
 };
-
-texture loadTexture(char *path, bool in_exe_directory = false);
-texture createTexture(u32 *texels, u32 width, u32 height);
-void deleteTexture(texture tex);
 
 struct ui_id {
    char *loc;
@@ -276,6 +292,12 @@ void addCommand(element *e, RenderCommand *command) {
 }
 
 //Render command helper functions---------------------------------
+#define RED V4(1, 0, 0, 1)
+#define BLUE V4(0, 0, 1, 1)
+#define GREEN V4(0, 1, 0, 1)
+#define WHITE V4(1, 1, 1, 1)
+#define BLACK V4(0, 0, 0, 1)
+
 RenderCommand *Rectangle(element *e, rect2 bounds, v4 colour) {
    UIContext *context = e->context;
    RenderCommand *result = PushStruct(&context->frame_arena, RenderCommand);
@@ -292,33 +314,39 @@ RenderCommand *Background(element *e, v4 colour) {
    return Rectangle(e, e->bounds, colour);
 }
 
-RenderCommand *Line(element *e, v2 a, v2 b, v4 colour, f32 thickness = 2) {
+RenderCommand *_Line(element *e, v4 colour, f32 thickness, v2 *points, u32 point_count, bool closed = false) {
    UIContext *context = e->context;
-   RenderCommand *result = PushStruct(&context->frame_arena, RenderCommand);
+   MemoryArena *arena = &context->frame_arena;
+
+   RenderCommand *result = PushStruct(arena, RenderCommand);
    result->type = RenderCommand_Line;
    result->next = NULL;
-   result->drawLine.a = a;
-   result->drawLine.b = b;
+   
    result->drawLine.colour = colour;
    result->drawLine.thickness = thickness;
+   result->drawLine.point_count = point_count;
+   result->drawLine.points = PushArrayCopy(arena, v2, points, point_count);
+   result->drawLine.closed = closed;
    
    addCommand(e, result);
    return result;
 }
 
+#define Line(e, colour, thickness, ...) do {v2 __points[] = {__VA_ARGS__}; _Line(e, colour, thickness, __points, ArraySize(__points), false); } while(false)
+#define Loop(e, colour, thickness, ...) do {v2 __points[] = {__VA_ARGS__}; _Line(e, colour, thickness, __points, ArraySize(__points), true); } while(false)
+
 void Outline(element *e, rect2 b, v4 colour, f32 thickness = 2) {
    //TODO: move the outline in by the thickness
-   Line(e, V2(b.min.x, b.min.y), V2(b.max.x, b.min.y), colour, thickness);
-   Line(e, V2(b.max.x, b.min.y), V2(b.max.x, b.max.y), colour, thickness);
-   Line(e, V2(b.max.x, b.max.y), V2(b.min.x, b.max.y), colour, thickness);
-   Line(e, V2(b.min.x, b.max.y), V2(b.min.x, b.min.y), colour, thickness);
+   Loop(e, colour, thickness, 
+        V2(b.min.x, b.min.y), V2(b.max.x, b.min.y), 
+        V2(b.max.x, b.max.y), V2(b.min.x, b.max.y));
 }
 
 void Outline(element *e, v4 colour, f32 thickness = 2) {
    Outline(e, e->bounds, colour, thickness);
 }
 
-RenderCommand *Texture(element *e, texture tex, rect2 bounds) {
+RenderCommand *Texture(element *e, texture tex, rect2 bounds, v4 colour = WHITE) {
    UIContext *context = e->context;
    RenderCommand *result = PushStruct(&context->frame_arena, RenderCommand);
    result->type = RenderCommand_Texture;
@@ -326,13 +354,11 @@ RenderCommand *Texture(element *e, texture tex, rect2 bounds) {
    result->drawTexture.bounds = bounds;
    result->drawTexture.uvBounds = RectMinSize(V2(0, 0), tex.size);
    result->drawTexture.tex = tex;
+   result->drawTexture.colour = colour;
    
    addCommand(e, result);
    return result;
 }
-
-extern loaded_font test_font;
-glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint);
 
 struct ui_glyph_layout {
    glyph_texture *glyph_tex;
@@ -347,6 +373,7 @@ struct ui_text_layout {
 };
 
 //TODO: kerning
+//TODO: multiple lines
 ui_text_layout LayoutText(UIContext *context, string text, f32 line_height) {
    ui_text_layout result = {};
    result.baseline = test_font.baseline_from_top_over_line_height * line_height;
@@ -382,21 +409,29 @@ rect2 GetCharBounds(UIContext *context, string text, u32 i, v2 pos, f32 line_hei
    return pos + layed_out_text.glyphs[i].bounds;
 }
 
-void Text(element *e, string text, v2 pos, f32 line_height, v4 colour) {   
+void Text(element *e, ui_text_layout layed_out_text, v2 pos, v4 colour) {   
    UIContext *context = e->context;
-   ui_text_layout layed_out_text = LayoutText(context, text, line_height);
 
    if(context->debug_mode) {
-      Line(e, pos + V2(0, layed_out_text.baseline), pos + V2(Size(layed_out_text.text_bounds).x, layed_out_text.baseline), V4(0, 0, 0, 1));
-      Outline(e, pos + layed_out_text.text_bounds, V4(0, 0, 0, 1));
+      Line(e, BLACK, 2,
+           pos + V2(0, layed_out_text.baseline), 
+           pos + V2(Size(layed_out_text.text_bounds).x, layed_out_text.baseline));
+      Outline(e, pos + layed_out_text.text_bounds, BLACK);
    }
 
    for(u32 i = 0; i < layed_out_text.glyph_count; i++) {
       ui_glyph_layout *glyph = layed_out_text.glyphs + i;
       
       //TODO: actually respect the text colour
-      Texture(e, glyph->glyph_tex->tex, pos + glyph->bounds);
+      Texture(e, glyph->glyph_tex->tex, pos + glyph->bounds, colour);
    }
+}
+
+
+void Text(element *e, string text, v2 pos, f32 line_height, v4 colour) {   
+   UIContext *context = e->context;
+   ui_text_layout layed_out_text = LayoutText(context, text, line_height);
+   Text(e, layed_out_text, pos, colour);
 }
 
 void Text(element *e, char *s, v2 pos, f32 height, v4 colour) {
@@ -406,11 +441,6 @@ void Text(element *e, char *s, v2 pos, f32 height, v4 colour) {
 //TODO: pass font in as a param, dont store in context?
 //or maybe we could do themeing in the context?  
 
-#define RED V4(1, 0, 0, 1)
-#define BLUE V4(0, 0, 1, 1)
-#define GREEN V4(0, 1, 0, 1)
-#define WHITE V4(1, 1, 1, 1)
-#define BLACK V4(0, 0, 0, 1)
 //---------------------------------------------------------------------
 
 v2 Cursor(element *e) {
@@ -438,7 +468,8 @@ enum ui_interaction_captures {
    INTERACTION_VERTICAL_SCROLL = INTERACTION_HOT | _INTERACTION_VERTICAL_SCROLL,
    _INTERACTION_HORIZONTAL_SCROLL = (1 << 6),
    INTERACTION_HORIZONTAL_SCROLL = INTERACTION_HOT | _INTERACTION_HORIZONTAL_SCROLL,
-   INTERACTION_FILEDROP = (1 << 7)
+   _INTERACTION_FILEDROP = (1 << 7),
+   INTERACTION_FILEDROP = INTERACTION_HOT | _INTERACTION_FILEDROP
 };
 
 #define AssertHasFlags(var, flags) Assert(((var) & (flags)) == (flags))
@@ -484,6 +515,8 @@ struct ui_dropped_files {
 };
 
 ui_dropped_files GetDroppedFiles(element *e) {
+   AssertHasFlags(e->captures, INTERACTION_FILEDROP);
+   
    ui_dropped_files result = {};
    if(e->id == e->context->filedrop_e) {
       result.count = e->context->filedrop_count;
@@ -542,7 +575,7 @@ void uiTick(element *e) {
       }
    }
 
-   if(e->captures & INTERACTION_FILEDROP) {
+   if(e->captures & _INTERACTION_FILEDROP) {
       if(IsHot(e)) {
          context->new_filedrop_e = e->id;
       }
@@ -664,6 +697,7 @@ element *_Panel(ui_id id, element *parent, v2 size, panel_args args = {}) {
 }
 
 //Common layout types-----------------------------------
+//TODO: make all the layouts work properly
 rect2 columnLayout(element *e, u8 *layout_data, v2 element_size, v2 padding_size, v2 margin_size) {
    v2 *at = (v2 *) layout_data;
    v2 pos = *at;
@@ -724,9 +758,11 @@ element *_StackPanel(ui_id id, element *parent, v2 size, panel_args args = {}) {
 element *_StackPanel(ui_id id, element *parent, rect2 bounds, panel_args args = {}) {
    return _Panel(id, parent, bounds, args.Layout(StackLayout));
 }
+
+//TODO: flow layout
+
 //--------------------------------------------------------
 
-//TODO: text colour, maybe redo optional params like we did for other stuff
 #define Label(...) _Label(GEN_UI_ID, __VA_ARGS__)
 element *_Label(ui_id id, element *parent, string text, f32 line_height, v4 text_colour, 
                 v2 p = V2(0, 0), v2 m = V2(0, 0)) 
@@ -743,6 +779,19 @@ element *_Label(ui_id id, element *parent, char *text, f32 line_height, v4 text_
                 v2 p = V2(0, 0), v2 m = V2(0, 0)) 
 {
    return _Label(id, parent, Literal(text), line_height, text_colour, p, m);
+}
+
+element *_Label(ui_id id, element *parent, string text, v2 size, f32 line_height, v4 text_colour) {
+   UIContext *context = parent->context;
+   ui_text_layout layed_out_text = LayoutText(context, text, line_height);
+   
+   element *result = _Panel(id, parent, size);
+   Text(result, layed_out_text, Center(result) - 0.5 * Size(layed_out_text.text_bounds), text_colour);
+   return result;
+}
+
+element *_Label(ui_id id, element *parent, char *text, v2 size, f32 line_height, v4 text_colour) {
+   return _Label(id, parent, Literal(text), size, line_height, text_colour);
 }
 
 //Persistent-Data-------------------------------------------------

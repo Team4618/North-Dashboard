@@ -58,14 +58,7 @@ PFNGLTEXTUREPARAMETERIPROC glTextureParameteri;
 
 PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
 
-struct image {
-   u32 *texels;
-   u32 width;
-   u32 height;
-   bool valid;
-};
-
-image ReadImage(char *path, bool in_exe_directory = false) {
+image ReadImage(char *path, bool in_exe_directory) {
    image result = {};
    buffer file = ReadEntireFile(path, in_exe_directory);
 
@@ -84,7 +77,7 @@ image ReadImage(char *path, bool in_exe_directory = false) {
    return result;
 }
 
-image ReadImage(string path, bool in_exe_directory = false) {
+image ReadImage(string path, bool in_exe_directory) {
    return ReadImage(ToCString(path), in_exe_directory);
 }
 
@@ -260,14 +253,15 @@ struct openglContext {
       GLuint handle;
       GLint matrix_uniform; 
       GLint texture_uniform;
+      GLint colour_uniform;
    } tex;
    
-   struct {
-      GLuint handle;
-      GLint matrix_uniform; 
-      GLint texture_uniform;
-      GLint colour_uniform; 
-   } sdf;
+   // struct {
+   //    GLuint handle;
+   //    GLint matrix_uniform; 
+   //    GLint texture_uniform;
+   //    GLint colour_uniform; 
+   // } sdf;
    
    GLuint buffers[3];
 };
@@ -420,11 +414,12 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    gl.tex.handle = shaderProgram(transformWithUVVert, textureFragment);
    gl.tex.matrix_uniform = glGetUniformLocation(gl.tex.handle, "Matrix");
    gl.tex.texture_uniform = glGetUniformLocation(gl.tex.handle, "Texture");
+   gl.tex.colour_uniform = glGetUniformLocation(gl.tex.handle, "Colour");
    
-   gl.sdf.handle = shaderProgram(transformWithUVVert, sdfFragment);
-   gl.sdf.matrix_uniform = glGetUniformLocation(gl.sdf.handle, "Matrix");
-   gl.sdf.texture_uniform = glGetUniformLocation(gl.sdf.handle, "Texture");
-   gl.sdf.colour_uniform = glGetUniformLocation(gl.sdf.handle, "Colour");
+   // gl.sdf.handle = shaderProgram(transformWithUVVert, sdfFragment);
+   // gl.sdf.matrix_uniform = glGetUniformLocation(gl.sdf.handle, "Matrix");
+   // gl.sdf.texture_uniform = glGetUniformLocation(gl.sdf.handle, "Texture");
+   // gl.sdf.colour_uniform = glGetUniformLocation(gl.sdf.handle, "Colour");
    
    glCreateVertexArrays(1, &gl.vao);
    glBindVertexArray(gl.vao);
@@ -457,49 +452,51 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    return result;
 }
 
-void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 transform, openglContext *gl) {
-   // glScissor(bounds.min.x, window_size.y - bounds.max.y, Size(bounds).x, Size(bounds).y);
+void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 transform, ui_impl_win32_window *window) {
+   openglContext *gl = &window->gl;
+   glScissor(bounds.min.x, window->size.y - bounds.max.y, Size(bounds).x, Size(bounds).y);
 
    for(RenderCommand *command = first_command; command; command = command->next) {
       switch(command->type) {
          case RenderCommand_SDF: {
-            glUseProgram(gl->sdf.handle);
-            glUniformMatrix4fv(gl->sdf.matrix_uniform, 1, GL_FALSE, transform.e);
-            glUniform4fv(gl->sdf.colour_uniform, 1, command->drawSDF.colour.e);
-            glUniform1i(gl->sdf.texture_uniform, 0);
-            glBindTextureUnit(0, command->drawSDF.sdf.handle);
+            // glUseProgram(gl->sdf.handle);
+            // glUniformMatrix4fv(gl->sdf.matrix_uniform, 1, GL_FALSE, transform.e);
+            // glUniform4fv(gl->sdf.colour_uniform, 1, command->drawSDF.colour.e);
+            // glUniform1i(gl->sdf.texture_uniform, 0);
+            // glBindTextureUnit(0, command->drawSDF.sdf.handle);
             
-            glEnableVertexArrayAttrib(gl->vao, position_slot);
-            glEnableVertexArrayAttrib(gl->vao, uv_slot);
-            glDisableVertexArrayAttrib(gl->vao, colour_slot);
+            // glEnableVertexArrayAttrib(gl->vao, position_slot);
+            // glEnableVertexArrayAttrib(gl->vao, uv_slot);
+            // glDisableVertexArrayAttrib(gl->vao, colour_slot);
             
-            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
-            glVertexArrayVertexBuffer(gl->vao, uv_slot, gl->buffers[1], 0, sizeof(v2));
+            // glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
+            // glVertexArrayVertexBuffer(gl->vao, uv_slot, gl->buffers[1], 0, sizeof(v2));
             
-            rect2 bounds = command->drawSDF.bounds;
-            v2 verts[6] = {
-               bounds.min, bounds.min + YOf(Size(bounds)), bounds.max, 
-               bounds.min, bounds.min + XOf(Size(bounds)), bounds.max
-            };
+            // rect2 bounds = command->drawSDF.bounds;
+            // v2 verts[6] = {
+            //    bounds.min, bounds.min + YOf(Size(bounds)), bounds.max, 
+            //    bounds.min, bounds.min + XOf(Size(bounds)), bounds.max
+            // };
             
-            rect2 uvBounds = command->drawSDF.uvBounds;
-            v2 uvs[6] = {
-               uvBounds.min, uvBounds.min + YOf(Size(uvBounds)), uvBounds.max, 
-               uvBounds.min, uvBounds.min + XOf(Size(uvBounds)), uvBounds.max
-            };
+            // rect2 uvBounds = command->drawSDF.uvBounds;
+            // v2 uvs[6] = {
+            //    uvBounds.min, uvBounds.min + YOf(Size(uvBounds)), uvBounds.max, 
+            //    uvBounds.min, uvBounds.min + XOf(Size(uvBounds)), uvBounds.max
+            // };
             
-            for(u32 i = 0; i < 6; i++)
-               uvs[i] = uvs[i] / command->drawSDF.sdf.size;
+            // for(u32 i = 0; i < 6; i++)
+            //    uvs[i] = uvs[i] / command->drawSDF.sdf.size;
             
-            glNamedBufferData(gl->buffers[0], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
-            glNamedBufferData(gl->buffers[1], 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
+            // glNamedBufferData(gl->buffers[0], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
+            // glNamedBufferData(gl->buffers[1], 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
             
-            glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
+            // glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
          } break;
          
          case RenderCommand_Texture: {
             glUseProgram(gl->tex.handle);
             glUniformMatrix4fv(gl->tex.matrix_uniform, 1, GL_FALSE, transform.e);
+            glUniform4fv(gl->tex.colour_uniform, 1, command->drawTexture.colour.e);
             glUniform1i(gl->tex.texture_uniform, 0);
             glBindTextureUnit(0, command->drawTexture.tex.handle);
             
@@ -554,29 +551,29 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
          } break;
          
          case RenderCommand_Line: {
-            glUseProgram(gl->col.handle);
-            glUniformMatrix4fv(gl->col.matrix_uniform, 1, GL_FALSE, transform.e);
-            glUniform4fv(gl->col.colour_uniform, 1, command->drawLine.colour.e);
-            glLineWidth(command->drawLine.thickness);
+            // glUseProgram(gl->col.handle);
+            // glUniformMatrix4fv(gl->col.matrix_uniform, 1, GL_FALSE, transform.e);
+            // glUniform4fv(gl->col.colour_uniform, 1, command->drawLine.colour.e);
+            // glLineWidth(command->drawLine.thickness);
             
-            glEnableVertexArrayAttrib(gl->vao, position_slot);
-            glDisableVertexArrayAttrib(gl->vao, uv_slot);
-            glDisableVertexArrayAttrib(gl->vao, colour_slot);
+            // glEnableVertexArrayAttrib(gl->vao, position_slot);
+            // glDisableVertexArrayAttrib(gl->vao, uv_slot);
+            // glDisableVertexArrayAttrib(gl->vao, colour_slot);
             
-            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
+            // glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
             
-            v2 verts[2] = { command->drawLine.a, command->drawLine.b };
+            // v2 verts[2] = { command->drawLine.a, command->drawLine.b };
             
-            glNamedBufferData(gl->buffers[0], 2 * sizeof(v2), verts, GL_STREAM_DRAW);
+            // glNamedBufferData(gl->buffers[0], 2 * sizeof(v2), verts, GL_STREAM_DRAW);
             
-            glDrawArrays(GL_LINES, 0, 2);
+            // glDrawArrays(GL_LINES, 0, 2);
          } break;
       }
    }
 }
 
-void DrawElement(element *e, mat4 transform, openglContext *gl) {
-   DrawRenderCommandBuffer(e->first_command, e->cliprect, transform, gl);
+void DrawElement(element *e, mat4 transform, ui_impl_win32_window *window) {
+   DrawRenderCommandBuffer(e->first_command, e->cliprect, transform, window);
 
    if(e->context->debug_mode) {
       //TODO: draw boxes for interaction captures
@@ -585,7 +582,7 @@ void DrawElement(element *e, mat4 transform, openglContext *gl) {
    uiTick(e);
 
    for(element *child = e->first_child; child; child = child->next) {
-      DrawElement(child, transform, gl);
+      DrawElement(child, transform, window);
    }
 }
 
@@ -692,15 +689,16 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
          case WM_DROPFILES: {
             HDROP drop = (HDROP) msg.wParam;
             MemoryArena *arena = &ui->filedrop_arena;
-            
+            Reset(arena);
+
             u32 file_count = DragQueryFileA(drop, 0xFFFFFFFF, NULL, 0);
             string *files = PushArray(arena, string, file_count);
 
             for(u32 i = 0; i < file_count; i++) {
-               u32 size = DragQueryFileA(drop, i, NULL, 0);
+               u32 size = DragQueryFileA(drop, i, NULL, 0) + 1;
                string *file = files + i;
                
-               *file = String(PushArray(arena, char, size), size);
+               *file = String(PushArray(arena, char, size), size - 1);
                DragQueryFileA(drop, i, file->text, size);
             }
             DragFinish(drop);
@@ -748,13 +746,15 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
 void endFrame(ui_impl_win32_window *window, element *root) {
    UIContext *context = root->context;
    Reset(&context->filedrop_arena);
+   context->filedrop_count = 0;
+   context->filedrop_names = NULL;
    
    glScissor(0, 0, window->size.x, window->size.y);
    glClearColor(1, 1, 1, 1);
    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
    mat4 transform = Orthographic(0, window->size.y, 0, window->size.x, 100, -100);
-   DrawElement(root, transform, &window->gl);
+   DrawElement(root, transform, window);
    
    //TODO: draw frame counter & what elements currently captured the interactions 
    if(context->debug_mode) {
@@ -777,7 +777,7 @@ void endFrame(ui_impl_win32_window *window, element *root) {
          Outline(debug_root, context->debug_hot_e->bounds, BLACK, 5);
       }
 
-      DrawElement(debug_root, transform, &window->gl);
+      DrawElement(debug_root, transform, window);
    }
 
    SwapBuffers(window->gl.dc);

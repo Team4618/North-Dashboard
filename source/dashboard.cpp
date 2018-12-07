@@ -230,7 +230,9 @@ void DrawAutoNode(DashboardState *state, ui_field_topdown *field, AutoNode *node
 
 void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path, bool preview) {
    if(path->control_point_count == 0) {
-      Line(field->e, GetPoint(field, path->in_node->pos), GetPoint(field, path->out_node->pos), BLACK);
+      Line(field->e, BLACK, 2,
+           GetPoint(field, path->in_node->pos), 
+           GetPoint(field, path->out_node->pos));
    } else {
       //TODO: Not a fan of having to put this in a temp array
       u32 point_count = path->control_point_count + 2;
@@ -271,9 +273,9 @@ void DrawHome(element *page, DashboardState *state) {
          v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
                                  -sinf(starting_pos->angle * (PI32 / 180)));
          Background(field_starting_pos, RED);
-         Line(field_starting_pos, Center(field_starting_pos->bounds),
-                                  Center(field_starting_pos->bounds) + 10 * direction_arrow,
-                                  BLACK);           
+         Line(field_starting_pos, BLACK, 2,
+              Center(field_starting_pos->bounds),
+              Center(field_starting_pos->bounds) + 10 * direction_arrow);           
 
          if(WasClicked(field_starting_pos)) {
             state->home_field.starting_pos_selected = true;
@@ -328,10 +330,10 @@ void DrawHome(element *page, DashboardState *state) {
 
    } else {
       if(!state->settings.field.loaded)
-         Label(page, "No Field", 50, BLACK);
+         Label(page, "No Field", V2(Size(page).x, 80), 50, BLACK);
       
       if(!IsValid(&state->current_profile))
-         Label(page, "No Robot", 50, BLACK);
+         Label(page, "No Robot", V2(Size(page).x, 80), 50, BLACK);
    }
 }
 
@@ -501,12 +503,12 @@ void DrawUI(element *root, DashboardState *state) {
    element *status_bar = RowPanel(root, V2(Size(root).x, status_bar_height));
    Background(status_bar, dark_grey);
    if(state->current_profile.state == RobotProfileState::Connected) {
-      Label(status_bar, state->current_profile.name, 20, BLACK, V2(10, 0));
-      Label(status_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, BLACK, V2(10, 0));
+      Label(status_bar, state->current_profile.name, 20, WHITE, V2(10, 0));
+      Label(status_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, WHITE, V2(10, 0));
    } else if(state->current_profile.state == RobotProfileState::Loaded) {
-      Label(status_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, BLACK, V2(10, 0));
+      Label(status_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, WHITE, V2(10, 0));
    } else {
-      Label(status_bar, "No Robot", 20, BLACK, V2(5, 0));
+      Label(status_bar, "No Robot", 20, WHITE, V2(5, 0));
    }
    
    element *page_tabs = RowPanel(root, V2(Size(root).x, page_tab_height));

@@ -214,7 +214,7 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
                GraphEntry curr_entry = block->entries[i];
                v2 a = GetPointFor(data, curr_graph, graph->bounds, prev_entry);
                v2 b = GetPointFor(data, curr_graph, graph->bounds, curr_entry);
-               Line(graph, a, b, curr_graph->colour, highlight ? 4 : 2);
+               Line(graph, curr_graph->colour, highlight ? 4 : 2, a, b);
                prev_entry = curr_entry;
             }
 
@@ -224,7 +224,7 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
                f32 min_value = (curr_graph->unit_id == 0) ? curr_graph->min_value : data->units[curr_graph->unit_id].min_value;
                f32 max_value = (curr_graph->unit_id == 0) ? curr_graph->max_value : data->units[curr_graph->unit_id].max_value;
                f32 y = Size(bounds).y * (1 - ((0 - min_value) / (max_value - min_value)));
-               Line(graph, V2(bounds.min.x, y), V2(bounds.max.x, y), BLACK);
+               Line(graph, BLACK, 2, V2(bounds.min.x, y), V2(bounds.max.x, y));
             }
 
             if(is_end_block)
