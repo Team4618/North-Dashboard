@@ -459,6 +459,10 @@ v2 operator+ (v2 a, v2 b) {
 	return output;
 }
 
+v2 operator- (v2 v) {
+	return V2(-v.x, -v.y);
+}
+
 v2 operator- (v2 a, v2 b) {
 	v2 output = {};
 	output.x = a.x - b.x;
@@ -494,10 +498,19 @@ v2 operator/ (v2 a, v2 b) {
 	return output;
 }
 
+v2 Perp(v2 v) {
+   return V2(v.y, -v.x);
+}
+
 #include "math.h"
 
 f32 Length(v2 a) { return sqrtf(a.x * a.x + a.y * a.y); }
 f32 Distance(v2 a, v2 b) { return Length(a - b); }
+
+v2 Normalize(v2 v) {
+   f32 len = Length(v);
+   return (len == 0) ? V2(0, 0) : (v / len);
+}
 
 struct rect2 {
    v2 min;

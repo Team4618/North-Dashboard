@@ -41,6 +41,7 @@ PFNGLNAMEDBUFFERDATAPROC glNamedBufferData;
 PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
 PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv;
 PFNGLUNIFORM4FVPROC glUniform4fv;
+PFNGLUNIFORM1FPROC glUniform1f;
 
 PFNGLVERTEXARRAYVERTEXBUFFERPROC glVertexArrayVertexBuffer;
 PFNGLENABLEVERTEXARRAYATTRIBPROC glEnableVertexArrayAttrib;
@@ -238,6 +239,7 @@ void opengl_debug_callback(GLenum source, GLenum type, GLuint id, GLenum severit
 const GLuint position_slot = 0;
 const GLuint uv_slot = 1;
 const GLuint colour_slot = 2;
+const GLuint normal_slot = 3;
 
 struct openglContext {
    HDC dc;
@@ -256,16 +258,16 @@ struct openglContext {
       GLint colour_uniform;
    } tex;
    
-   // struct {
-   //    GLuint handle;
-   //    GLint matrix_uniform; 
-   //    GLint texture_uniform;
-   //    GLint colour_uniform; 
-   // } sdf;
+   struct {
+      GLuint handle;
+      GLint matrix_uniform;
+      GLint colour_uniform;
+      GLint width_uniform;
+      GLint feather_uniform;
+   } line;
    
-   GLuint buffers[3];
+   GLuint buffers[4];
 };
-
 
 struct ui_impl_win32_window {
    HWND handle;
@@ -301,6 +303,8 @@ LRESULT CALLBACK impl_WindowMessageEvent(HWND window, UINT message, WPARAM wPara
    
    return DefWindowProc(window, message, wParam, lParam);
 }
+
+//TODO: cleanup all this opengl stuff once the actual apps are done
 
 ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_WindowMessageEvent) {
    HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -382,7 +386,8 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC) wglGetProcAddress("glGetUniformLocation");
    glUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC) wglGetProcAddress("glUniformMatrix4fv");
    glUniform4fv = (PFNGLUNIFORM4FVPROC) wglGetProcAddress("glUniform4fv");
-   
+   glUniform1f = (PFNGLUNIFORM1FPROC) wglGetProcAddress("glUniform1f");
+
    glVertexArrayVertexBuffer = (PFNGLVERTEXARRAYVERTEXBUFFERPROC) wglGetProcAddress("glVertexArrayVertexBuffer");
    glEnableVertexArrayAttrib = (PFNGLENABLEVERTEXARRAYATTRIBPROC) wglGetProcAddress("glEnableVertexArrayAttrib");
    glDisableVertexArrayAttrib = (PFNGLDISABLEVERTEXARRAYATTRIBPROC) wglGetProcAddress("glDisableVertexArrayAttrib");
@@ -405,7 +410,6 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    GLuint transformWithUVVert = loadShader("transform_UV.vert", GL_VERTEX_SHADER);
    GLuint colourFragment = loadShader("colour.frag", GL_FRAGMENT_SHADER);
    GLuint textureFragment = loadShader("texture.frag", GL_FRAGMENT_SHADER);
-   GLuint sdfFragment = loadShader("sdf.frag", GL_FRAGMENT_SHADER);
    
    gl.col.handle = shaderProgram(transformVert, colourFragment);
    gl.col.matrix_uniform = glGetUniformLocation(gl.col.handle, "Matrix");
@@ -416,10 +420,14 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    gl.tex.texture_uniform = glGetUniformLocation(gl.tex.handle, "Texture");
    gl.tex.colour_uniform = glGetUniformLocation(gl.tex.handle, "Colour");
    
-   // gl.sdf.handle = shaderProgram(transformWithUVVert, sdfFragment);
-   // gl.sdf.matrix_uniform = glGetUniformLocation(gl.sdf.handle, "Matrix");
-   // gl.sdf.texture_uniform = glGetUniformLocation(gl.sdf.handle, "Texture");
-   // gl.sdf.colour_uniform = glGetUniformLocation(gl.sdf.handle, "Colour");
+   GLuint lineVert = loadShader("line.vert", GL_VERTEX_SHADER);
+   GLuint lineFrag = loadShader("line.frag", GL_FRAGMENT_SHADER);
+
+   gl.line.handle = shaderProgram(lineVert, lineFrag);
+   gl.line.matrix_uniform = glGetUniformLocation(gl.line.handle, "Matrix");
+   gl.line.colour_uniform = glGetUniformLocation(gl.line.handle, "Colour");
+   gl.line.width_uniform = glGetUniformLocation(gl.line.handle, "Width");
+   gl.line.feather_uniform = glGetUniformLocation(gl.line.handle, "Feather");
    
    glCreateVertexArrays(1, &gl.vao);
    glBindVertexArray(gl.vao);
@@ -433,7 +441,10 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    glVertexArrayAttribFormat(gl.vao, colour_slot, 4, GL_FLOAT, GL_FALSE, 0);
    glVertexArrayAttribBinding(gl.vao, colour_slot, colour_slot);
    
-   glCreateBuffers(3, gl.buffers);
+   glVertexArrayAttribFormat(gl.vao, normal_slot, 2, GL_FLOAT, GL_FALSE, 0);
+   glVertexArrayAttribBinding(gl.vao, normal_slot, normal_slot);
+
+   glCreateBuffers(ArraySize(gl.buffers), gl.buffers);
 
    glEnable(GL_BLEND);
    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -458,41 +469,6 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
 
    for(RenderCommand *command = first_command; command; command = command->next) {
       switch(command->type) {
-         case RenderCommand_SDF: {
-            // glUseProgram(gl->sdf.handle);
-            // glUniformMatrix4fv(gl->sdf.matrix_uniform, 1, GL_FALSE, transform.e);
-            // glUniform4fv(gl->sdf.colour_uniform, 1, command->drawSDF.colour.e);
-            // glUniform1i(gl->sdf.texture_uniform, 0);
-            // glBindTextureUnit(0, command->drawSDF.sdf.handle);
-            
-            // glEnableVertexArrayAttrib(gl->vao, position_slot);
-            // glEnableVertexArrayAttrib(gl->vao, uv_slot);
-            // glDisableVertexArrayAttrib(gl->vao, colour_slot);
-            
-            // glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
-            // glVertexArrayVertexBuffer(gl->vao, uv_slot, gl->buffers[1], 0, sizeof(v2));
-            
-            // rect2 bounds = command->drawSDF.bounds;
-            // v2 verts[6] = {
-            //    bounds.min, bounds.min + YOf(Size(bounds)), bounds.max, 
-            //    bounds.min, bounds.min + XOf(Size(bounds)), bounds.max
-            // };
-            
-            // rect2 uvBounds = command->drawSDF.uvBounds;
-            // v2 uvs[6] = {
-            //    uvBounds.min, uvBounds.min + YOf(Size(uvBounds)), uvBounds.max, 
-            //    uvBounds.min, uvBounds.min + XOf(Size(uvBounds)), uvBounds.max
-            // };
-            
-            // for(u32 i = 0; i < 6; i++)
-            //    uvs[i] = uvs[i] / command->drawSDF.sdf.size;
-            
-            // glNamedBufferData(gl->buffers[0], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
-            // glNamedBufferData(gl->buffers[1], 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
-            
-            // glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
-         } break;
-         
          case RenderCommand_Texture: {
             glUseProgram(gl->tex.handle);
             glUniformMatrix4fv(gl->tex.matrix_uniform, 1, GL_FALSE, transform.e);
@@ -503,9 +479,7 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
             glEnableVertexArrayAttrib(gl->vao, position_slot);
             glEnableVertexArrayAttrib(gl->vao, uv_slot);
             glDisableVertexArrayAttrib(gl->vao, colour_slot);
-            
-            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
-            glVertexArrayVertexBuffer(gl->vao, uv_slot, gl->buffers[1], 0, sizeof(v2));
+            glDisableVertexArrayAttrib(gl->vao, normal_slot);
             
             rect2 bounds = command->drawTexture.bounds;
             v2 verts[6] = {
@@ -521,9 +495,12 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
             
             for(u32 i = 0; i < 6; i++)
                uvs[i] = uvs[i] / command->drawTexture.tex.size;
+
+            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[position_slot], 0, sizeof(v2));
+            glNamedBufferData(gl->buffers[position_slot], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
             
-            glNamedBufferData(gl->buffers[0], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
-            glNamedBufferData(gl->buffers[1], 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
+            glVertexArrayVertexBuffer(gl->vao, uv_slot, gl->buffers[uv_slot], 0, sizeof(v2));
+            glNamedBufferData(gl->buffers[uv_slot], 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
             
             glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
          } break;
@@ -536,8 +513,7 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
             glEnableVertexArrayAttrib(gl->vao, position_slot);
             glDisableVertexArrayAttrib(gl->vao, uv_slot);
             glDisableVertexArrayAttrib(gl->vao, colour_slot);
-            
-            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
+            glDisableVertexArrayAttrib(gl->vao, normal_slot);
             
             rect2 bounds = command->drawRectangle.bounds;
             v2 verts[6] = {
@@ -545,28 +521,76 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
                bounds.min, bounds.min + XOf(Size(bounds)), bounds.max
             };
             
-            glNamedBufferData(gl->buffers[0], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
+            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[position_slot], 0, sizeof(v2));
+            glNamedBufferData(gl->buffers[position_slot], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
             
             glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
          } break;
          
          case RenderCommand_Line: {
-            // glUseProgram(gl->col.handle);
-            // glUniformMatrix4fv(gl->col.matrix_uniform, 1, GL_FALSE, transform.e);
-            // glUniform4fv(gl->col.colour_uniform, 1, command->drawLine.colour.e);
-            // glLineWidth(command->drawLine.thickness);
+            if(command->drawLine.point_count < 2)
+               continue;
+
+            glUseProgram(gl->line.handle);
+            glUniformMatrix4fv(gl->line.matrix_uniform, 1, GL_FALSE, transform.e);
+            glUniform4fv(gl->line.colour_uniform, 1, command->drawLine.colour.e);
+            glUniform1f(gl->line.width_uniform, command->drawLine.thickness);
+            glUniform1f(gl->line.feather_uniform, 2);
             
-            // glEnableVertexArrayAttrib(gl->vao, position_slot);
-            // glDisableVertexArrayAttrib(gl->vao, uv_slot);
-            // glDisableVertexArrayAttrib(gl->vao, colour_slot);
+            glEnableVertexArrayAttrib(gl->vao, position_slot);
+            glDisableVertexArrayAttrib(gl->vao, uv_slot);
+            glDisableVertexArrayAttrib(gl->vao, colour_slot);
+            glEnableVertexArrayAttrib(gl->vao, normal_slot);
             
-            // glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[0], 0, sizeof(v2));
+            u32 vert_count = (command->drawLine.point_count - 1) * 6;
+            v2 *verts = PushTempArray(v2, vert_count);
+            v2 *normals = PushTempArray(v2, vert_count);
+
+            v2 last_point = command->drawLine.points[0];
+            for(u32 i = 1; i < command->drawLine.point_count; i++) {
+               v2 point = command->drawLine.points[i];
+               v2 line_normal = Normalize(Perp(point - last_point));
+               v2 normal_a = line_normal;
+               v2 normal_b = line_normal;
+
+               //TODO: fix line joints
+               // if(i > 1) {
+               //    v2 prev_line_normal = Normalize(Perp(command->drawLine.points[i - 1] - point));
+               //    normal_a = normal_a + prev_line_normal;
+               // }
+
+               // if(1 < (command->drawLine.point_count - 1)) {
+               //    v2 next_line_normal = Normalize(Perp(point - command->drawLine.points[i + 1]));
+               //    normal_b = normal_b + next_line_normal;
+               // }
+
+               v2 *vert = verts + 6 * (i - 1);
+               v2 *normal = normals + 6 * (i - 1);
+               
+               vert[0] = last_point;
+               vert[1] = last_point;
+               vert[2] = point;
+               vert[3] = last_point;
+               vert[4] = point;
+               vert[5] = point;
+
+               normal[0] = normal_a;
+               normal[1] = -normal_a;
+               normal[2] = normal_b;
+               normal[3] = -normal_a;
+               normal[4] = normal_b;
+               normal[5] = -normal_b;
+
+               last_point = point;
+            }
+
+            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[position_slot], 0, sizeof(v2));
+            glNamedBufferData(gl->buffers[position_slot], vert_count * sizeof(v2), verts, GL_STREAM_DRAW);
             
-            // v2 verts[2] = { command->drawLine.a, command->drawLine.b };
+            glVertexArrayVertexBuffer(gl->vao, normal_slot, gl->buffers[normal_slot], 0, sizeof(v2));
+            glNamedBufferData(gl->buffers[normal_slot], vert_count * sizeof(v2), normals, GL_STREAM_DRAW);
             
-            // glNamedBufferData(gl->buffers[0], 2 * sizeof(v2), verts, GL_STREAM_DRAW);
-            
-            // glDrawArrays(GL_LINES, 0, 2);
+            glDrawArrays(GL_TRIANGLES, 0, vert_count);
          } break;
       }
    }
@@ -756,7 +780,6 @@ void endFrame(ui_impl_win32_window *window, element *root) {
    mat4 transform = Orthographic(0, window->size.y, 0, window->size.x, 100, -100);
    DrawElement(root, transform, window);
    
-   //TODO: draw frame counter & what elements currently captured the interactions 
    if(context->debug_mode) {
       element *debug_root = PushStruct(&context->frame_arena, element);
       debug_root->context = context;

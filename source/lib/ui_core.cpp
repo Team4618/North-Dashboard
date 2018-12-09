@@ -38,7 +38,6 @@ extern loaded_font test_font; //TODO: get rid of this
 glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint);
 
 enum RenderCommandType {
-   RenderCommand_SDF,
    RenderCommand_Texture,
    RenderCommand_Rectangle,
    RenderCommand_Line
@@ -49,13 +48,6 @@ struct RenderCommand {
    RenderCommand *next;
    
    union {
-      struct {
-         rect2 bounds;
-         rect2 uvBounds; //NOTE: specified in texture space, not 0 to 1
-         texture sdf;
-         v4 colour;
-      } drawSDF;
-      
       struct { 
          rect2 bounds;
          rect2 uvBounds; //NOTE: specified in texture space, not 0 to 1

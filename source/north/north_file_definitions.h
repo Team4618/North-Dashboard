@@ -95,12 +95,10 @@ namespace RobotProfile_Flags {
 struct RobotProfile_FileHeader {
 #define ROBOT_PROFILE_MAGIC_NUMBER RIFF_CODE("NCRP") 
 #define ROBOT_PROFILE_CURR_VERSION 0
-   u8 robot_name_length;
    u8 subsystem_count;
    f32 robot_width;
    f32 robot_length;
    u32 flags;
-   //char robot_name[robot_name_length]
    //RobotProfile_SubsystemDescription [subsystem_count]
 };
 //-----------------------------------------------------------

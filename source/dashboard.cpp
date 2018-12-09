@@ -41,6 +41,7 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
 #define INCLUDE_DRAWSETTINGS
 #include "north_settings_utils.cpp"
 #include "robot_recording_utils.cpp"
+#define INCLUDE_DRAWPROFILES
 #include "robot_profile_utils.cpp"
 
 struct ConnectedParameter;
@@ -148,16 +149,11 @@ struct DashboardState {
    //TODO: current auto path
 
    NorthSettings settings;
-   RobotProfile current_profile;
+   RobotProfiles profiles;
    
    LoadedRobotRecording recording;
    RobotRecorder auto_recorder;
    RobotRecorder manual_recorder;
-
-   struct {
-      bool starting_pos_selected;
-      v2 starting_pos;
-   } home_field;
 
    AutoProjectList auto_programs;
 
@@ -167,9 +163,6 @@ struct DashboardState {
    //AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
    //AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
    
-   RobotProfile loaded_profile; //NOTE: this is a file we're looking at
-   RobotProfile *selected_profile; //??
-
    North_GameMode::type prev_mode;
    North_GameMode::type mode;
    //--------------------------------------------------------
@@ -201,8 +194,8 @@ void initDashboard(DashboardState *state) {
    state->file_lists_arena = PlatformAllocArena(Megabyte(10));
    state->auto_recorder.arena = PlatformAllocArena(Megabyte(30));
    state->manual_recorder.arena = PlatformAllocArena(Megabyte(30));
-   state->current_profile.arena = PlatformAllocArena(Megabyte(10));
-   state->loaded_profile.arena = PlatformAllocArena(Megabyte(10));
+   state->profiles.current.arena = PlatformAllocArena(Megabyte(10));
+   state->profiles.loaded.arena = PlatformAllocArena(Megabyte(10));
    state->page = DashboardPage_Home;
    
    InitFileWatcher(&state->file_watcher, PlatformAllocArena(Kilobyte(512)), "*.*");
@@ -247,39 +240,46 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
          AutonomousProgram_ControlPoint a = all_points[i];
          AutonomousProgram_ControlPoint b = all_points[i + 1];
          
-         DrawCubicHermite(field, a.pos, a.tangent, b.pos, b.tangent);
+         CubicHermiteSpline(field, a.pos, a.tangent, b.pos, b.tangent, BLACK);
       }
    }
 
    DrawAutoNode(state, field, path->out_node, preview);
 }
 
-void DrawHome(element *page, DashboardState *state) {
-   StackLayout(page);
+void DrawHome(element *full_page, DashboardState *state) {
+   StackLayout(full_page);
+   element *page = VerticalList(full_page);
+   
+   static bool starting_pos_selected = false;
+   static Field_StartingPosition selected_starting_pos = {};
+   // static AutoProjectLink *selected_auto_project = NULL;
 
-   if(state->settings.field.loaded && IsValid(&state->current_profile)) {
-      RobotProfile *profile = &state->current_profile;
-      element *base = Panel(page, Size(page->bounds), Layout(ColumnLayout));
-      ui_field_topdown field = FieldTopdown(base, state->settings.field.image, state->settings.field.size,
+   if(state->settings.field.loaded && IsValid(&state->profiles.current)) {
+      RobotProfile *profile = &state->profiles.current;
+      
+      ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size,
                                             Size(page->bounds).x);
 
       v2 robot_size_px =  FeetToPixels(&field, profile->size);
       for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
          Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
-         element *field_starting_pos = _Panel(POINTER_UI_ID(starting_pos), field.e, 
-                                              RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px),
-                                              Captures(INTERACTION_CLICK));
+         UI_SCOPE(page->context, starting_pos);
          
+         element *field_starting_pos = Panel(field.e, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px),
+                                             Captures(INTERACTION_CLICK));
+         
+         bool is_selected = starting_pos_selected && (Length(selected_starting_pos.pos - starting_pos->pos) < 0.01);    
          v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
                                  -sinf(starting_pos->angle * (PI32 / 180)));
-         Background(field_starting_pos, RED);
+         Background(field_starting_pos, is_selected ? GREEN : RED);
          Line(field_starting_pos, BLACK, 2,
               Center(field_starting_pos->bounds),
               Center(field_starting_pos->bounds) + 10 * direction_arrow);           
 
          if(WasClicked(field_starting_pos)) {
-            state->home_field.starting_pos_selected = true;
-            state->home_field.starting_pos = starting_pos->pos;
+            starting_pos_selected = true;
+            selected_starting_pos = *starting_pos;
 
             ReadProjectsStartingAt(&state->auto_programs, 0, starting_pos->pos);
 
@@ -293,47 +293,49 @@ void DrawHome(element *page, DashboardState *state) {
 
       //TODO: draw current auto path
       
-      if(state->home_field.starting_pos_selected) {
-         // element *auto_selector = VerticalList(SlidingSidePanel(page, 300, 5, 50, true));
-         // Background(auto_selector, V4(0.5, 0.5, 0.5, 0.5));
+      if(starting_pos_selected) {
+         bool drawing_auto_preview = false;
+         Label(page, "Autos", 20, off_white);
+         //TODO: dont load on file change & show all autos
+         //      load when a position is selected & check if it starts there 
+         for(AutoProjectLink *auto_proj = state->auto_programs.first; auto_proj; auto_proj = auto_proj->next) {
+            UI_SCOPE(page->context, auto_proj);
 
-         // bool drawing_auto_preview = false;
-         // Label(auto_selector, "Autos", 20);
-         // //TODO: dont load on file change & show all autos
-         // //      load when a position is selected & check if it starts there 
-         // for(AutoProjectLink *auto_proj = state->auto_programs.first; auto_proj; auto_proj = auto_proj->next) {
-         //    UI_SCOPE(auto_selector->context, auto_proj);
+            ui_button btn = Button(page, auto_proj->name, menu_button);
 
-         //    ui_button btn = Button(auto_selector, menu_button, auto_proj->name);
+            if(btn.clicked) {
+               //state->selected_auto_project = auto_proj;
+            }
 
-         //    if(btn.clicked) {
-         //       //state->selected_auto_project = auto_proj;
-         //    }
+            if(IsHot(btn.e)) {
+               DrawAutoNode(state, &field, auto_proj->starting_node, true);
+               drawing_auto_preview = true;
+            }
+         }
 
-         //    if(IsHot(btn.e)) {
-         //       DrawAutoNode(state, &field, auto_proj->starting_node, true);
-         //       drawing_auto_preview = true;
-         //    }
-         // }
+         if(false /*state->selected_auto_node*/) {
+            //TODO: reorder path priorities
+         }
 
-         // if(false /*state->selected_auto_node*/) {
-         //    //TODO: reorder path priorities
-         // }
-
-         // if(false /*state->selected_auto_node*/) {
-         //    //DrawAutoNode(state, &field, state->selected_auto_project->starting_node, false);
-         //    if(Button(base, menu_button, "Upload Auto").clicked) {
-         //       //TODO: upload auto
-         //    }
-         // }
+         if(false /*state->selected_auto_node*/) {
+            //DrawAutoNode(state, &field, state->selected_auto_project->starting_node, false);
+            if(Button(page, "Upload Auto", menu_button).clicked) {
+               //TODO: upload auto
+            }
+         }
       }
 
    } else {
       if(!state->settings.field.loaded)
          Label(page, "No Field", V2(Size(page).x, 80), 50, BLACK);
       
-      if(!IsValid(&state->current_profile))
+      if(!IsValid(&state->profiles.current))
          Label(page, "No Robot", V2(Size(page).x, 80), 50, BLACK);
+   }
+
+   if(state->mode != North_GameMode::Disabled)
+   {
+      Label(page, "Robot Messages", V2(Size(page).x, 80), 50, BLACK);
    }
 }
 
@@ -344,141 +346,63 @@ void DrawSubsystem(element *page, ConnectedSubsystem *subsystem) {
 
 void DrawRecordings(element *full_page, DashboardState *state) {
    StackLayout(full_page);
-   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
-                                                      full_page->bounds.max - V2(60, 0)));
-   Outline(page, BLACK);
+   element *page = VerticalList(full_page);
+   
+   element *top_bar = RowPanel(page, V2(Size(page).x - 10, page_tab_height), Padding(5, 5));
+   Background(top_bar, dark_grey);
+   static bool selector_open = false;
 
-   if(state->recording.loaded) {
-      if(state->settings.field.loaded) {
-         ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
-                                             Size(page->bounds).x);
-
-         for(s32 i = 0; i < state->recording.robot_sample_count; i++) {
-            RobotRecording_RobotStateSample *sample = state->recording.robot_samples + i;
-            v2 p = GetPoint(&field, sample->pos);
-            Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
-         }
-      } else {
-         Label(page, "No field loaded", 20, BLACK);
-      }
-
-      //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
-      HorizontalSlider(page, &state->recording.curr_time, state->recording.min_time, state->recording.max_time,
-                       V2(Size(page->bounds).x - 40, 40), V2(20, 20));
-      
-      //TODO: highlight robot at current slider time
-      //TODO: draw vertical bar in multiline graph at t=curr_time
-
-      for(u32 i = 0; i < state->recording.subsystem_count; i++) {
-         SubsystemRecording *subsystem = state->recording.subsystems + i;
-         UI_SCOPE(page->context, subsystem);
-         Label(page, subsystem->name, 20, BLACK);
-         MultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
-      }
-
-   } else {
-      Label(page, "No run selected", 20, BLACK);
-
-      if(state->current_profile.state == RobotProfileState::Connected) {
-         string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));
-         if(Button(page, toggle_recording_text, menu_button).clicked) {
-            if(state->manual_recorder.recording) {
-               //TODO: actually generate a name for these
-               EndRecording(&state->manual_recorder, Literal("name"));
-            } else {
-               BeginRecording(&state->manual_recorder);
-            }
-         }
-      }
+   if(Button(top_bar, "Open Recording", menu_button.IsSelected(selector_open)).clicked) {
+      selector_open = !selector_open;
    }
-   
-   // element *recording_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
-   // Background(recording_selector, V4(0.5, 0.5, 0.5, 0.5));
-   // //TODO: readd this
-   // // if(DefaultClickInteraction(recording_selector).clicked) {
-   // //    state->recording.loaded = false;
-   // // }
 
-   // for(FileListLink *file = state->ncrr_files; file; file = file->next) {
-   //    if(_Button(POINTER_UI_ID(file), recording_selector, menu_button, file->name).clicked) {
-   //       LoadRecording(&state->recording, file->name);
-   //    }
-   // }
-}
+   if(selector_open) {
+      //TODO: readd this
+      // if(DefaultClickInteraction(recording_selector).clicked) {
+      //    state->recording.loaded = false;
+      // }
 
-void DrawRobots(element *full_page, DashboardState *state) {
-   StackLayout(full_page);
-   element *page = VerticalList(full_page, RectMinMax(full_page->bounds.min, 
-                                                      full_page->bounds.max - V2(60, 0)));
-
-   
-   if(state->selected_profile) {
-      RobotProfile *profile = state->selected_profile;
-      Label(page, profile->name, 20, BLACK);
-      
-      if(Button(page, "Load", menu_button).clicked) {
-         LoadProfileFile(&state->current_profile, profile->name);
-      }
-
-      for(u32 i = 0; i < profile->subsystem_count; i++) {
-         RobotProfileSubsystem *subsystem = profile->subsystems + i;
-         element *subsystem_page = Panel(page, V2(Size(page).x - 60, 400), Padding(20, 0).Layout(ColumnLayout));
-         Background(subsystem_page, V4(0.5, 0.5, 0.5, 0.5));
-
-         Label(subsystem_page, subsystem->name, 20, BLACK);
+      for(FileListLink *file = state->ncrr_files; file; file = file->next) {
+         UI_SCOPE(page->context, file);
          
-         Label(subsystem_page, "Parameters", 20, BLACK, V2(0, 20));
-         for(u32 j = 0; j < subsystem->param_count; j++) {
-            RobotProfileParameter *param = subsystem->params + j;
-            if(param->is_array) {
-               Label(subsystem_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
-               for(u32 k = 0; k < param->length; k++) {
-                  Label(subsystem_page, ToString(param->values[k]), 18, BLACK, V2(40, 0));
-               }
-            } else {
-               Label(subsystem_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, BLACK, V2(20, 0));
-            }
-         }
-
-         Label(subsystem_page, "Commands", 20, BLACK, V2(0, 20));
-         for(u32 j = 0; j < subsystem->command_count; j++) {
-            RobotProfileCommand *command = subsystem->commands + j;
-            //TODO: icon for command->type
-            string params = (command->param_count > 0) ? command->params[0] : EMPTY_STRING;
-            for(u32 k = 1; k < command->param_count; k++) {
-               params = Concat(params, Literal(", "), command->params[k]);
-            }
-            Label(subsystem_page, Concat(command->name, Literal("("), params, Literal(")")), 18, BLACK, V2(20, 0));  
+         if(Button(page, file->name, menu_button).clicked) {
+            LoadRecording(&state->recording, file->name);
+            selector_open = false;
          }
       }
+   } else {
+      if(state->recording.loaded) {
+         if(state->settings.field.loaded) {
+            ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
+                                                Size(page->bounds).x);
+
+            for(s32 i = 0; i < state->recording.robot_sample_count; i++) {
+               RobotRecording_RobotStateSample *sample = state->recording.robot_samples + i;
+               v2 p = GetPoint(&field, sample->pos);
+               Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
+            }
+         } else {
+            Label(page, "No field loaded", 20, BLACK);
+         }
+
+         //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
+         HorizontalSlider(page, &state->recording.curr_time, state->recording.min_time, state->recording.max_time,
+                        V2(Size(page->bounds).x - 40, 40), V2(20, 20));
+         
+         //TODO: highlight robot at current slider time
+         //TODO: draw vertical bar in multiline graph at t=curr_time
+
+         for(u32 i = 0; i < state->recording.subsystem_count; i++) {
+            SubsystemRecording *subsystem = state->recording.subsystems + i;
+            UI_SCOPE(page->context, subsystem);
+            Label(page, subsystem->name, 20, BLACK);
+            MultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
+         }
+
+      } else {   
+         selector_open = true;
+      }
    }
-
-   // element *run_selector = VerticalList(SlidingSidePanel(full_page, 300, 5, 30, true));
-   // Background(run_selector, V4(0.5, 0.5, 0.5, 0.5));
-
-   // if(state->current_profile.state == RobotProfileState::Connected) {
-   //    if(Button(run_selector, menu_button, "Connected Robot").clicked) {
-   //       state->selected_profile = &state->current_profile;
-   //    }
-
-   //    element *divider = Panel(run_selector, V2(Size(run_selector->bounds).x - 40, 5), Padding(10, 0));
-   //    Background(divider, BLACK);
-   // }
-
-   // for(FileListLink *file = state->ncrp_files; file; file = file->next) {
-   //    if((state->current_profile.state == RobotProfileState::Connected) && 
-   //       (state->current_profile.name == file->name))
-   //    {
-   //       continue;
-   //    }
-      
-   //    if(_Button(POINTER_UI_ID(file), run_selector, menu_button, file->name).clicked) {
-   //       LoadProfileFile(&state->loaded_profile, file->name);
-
-   //       if(IsValid(&state->loaded_profile))
-   //          state->selected_profile = &state->loaded_profile;
-   //    }
-   // }
 }
 
 //TODO: icons for pages
@@ -496,17 +420,24 @@ void DrawUI(element *root, DashboardState *state) {
    Background(root, light_grey);
    Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
    
+   if(root->context->debug_mode) {
+      Line(root, RED, 10, V2(40, 100), V2(500, 140), V2(650, 200));
+      Rectangle(root, RectCenterSize(V2(40, 100), V2(5, 5)), BLACK);
+      Rectangle(root, RectCenterSize(V2(500, 140), V2(5, 5)), BLACK);
+      Rectangle(root, RectCenterSize(V2(650, 200), V2(5, 5)), BLACK);
+   }
+
    if(state->directory_changed) {
       reloadFiles(state);
    }
 
    element *status_bar = RowPanel(root, V2(Size(root).x, status_bar_height));
    Background(status_bar, dark_grey);
-   if(state->current_profile.state == RobotProfileState::Connected) {
-      Label(status_bar, state->current_profile.name, 20, WHITE, V2(10, 0));
+   if(state->profiles.current.state == RobotProfileState::Connected) {
+      Label(status_bar, state->profiles.current.name, 20, WHITE, V2(10, 0));
       Label(status_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, WHITE, V2(10, 0));
-   } else if(state->current_profile.state == RobotProfileState::Loaded) {
-      Label(status_bar, Concat(state->current_profile.name, Literal(" (loaded from file)")), 20, WHITE, V2(10, 0));
+   } else if(state->profiles.current.state == RobotProfileState::Loaded) {
+      Label(status_bar, Concat(state->profiles.current.name, Literal(" (loaded from file)")), 20, WHITE, V2(10, 0));
    } else {
       Label(status_bar, "No Robot", 20, WHITE, V2(5, 0));
    }
@@ -523,7 +454,7 @@ void DrawUI(element *root, DashboardState *state) {
       case DashboardPage_Home: DrawHome(page, state); break;
       case DashboardPage_Subsystem: DrawSubsystem(page, state->selected_subsystem); break;
       case DashboardPage_Recordings: DrawRecordings(page, state); break;
-      case DashboardPage_Robots: DrawRobots(page, state); break;
+      case DashboardPage_Robots: DrawProfiles(page, &state->profiles, state->ncrp_files); break;
       case DashboardPage_Settings: {
          v2 robot_size_ft = V2(2, 2);
          string robot_size_label = Literal("No robot loaded, defaulting to 2x2ft");
@@ -549,6 +480,18 @@ void DrawUI(element *root, DashboardState *state) {
    //    element *divider2 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
    //    Background(divider2, BLACK);
    // }
+   
+   if(state->profiles.current.state == RobotProfileState::Connected) {
+      string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));
+      if(Button(page_tabs, toggle_recording_text, menu_button).clicked) {
+         if(state->manual_recorder.recording) {
+            //TODO: actually generate a name for these
+            EndRecording(&state->manual_recorder, Literal("name"));
+         } else {
+            BeginRecording(&state->manual_recorder);
+         }
+      }
+   }
 
    //TODO: move recordings to their own thread
    if((state->mode == North_GameMode::Autonomous) && 

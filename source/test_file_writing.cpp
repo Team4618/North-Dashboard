@@ -122,15 +122,12 @@ void WriteTestFiles() {
 
       FileHeader numbers = header(ROBOT_PROFILE_MAGIC_NUMBER, ROBOT_PROFILE_CURR_VERSION);
       RobotProfile_FileHeader header = {};
-      char robot_name[] = "test_robot";
-      header.robot_name_length = ArraySize(robot_name) - 1;
       header.robot_width = 28/12;
       header.robot_length = 28/12;
       header.subsystem_count = 1;
       WriteStruct(&test_robot, &numbers);
       WriteStruct(&test_robot, &header);
-      WriteArray(&test_robot, robot_name, header.robot_name_length);      
-
+      
       RobotProfile_SubsystemDescription test_subsystem = {};
       char test_subsystem_name[] = "subsystem_a";
       test_subsystem.name_length = ArraySize(test_subsystem_name) - 1;

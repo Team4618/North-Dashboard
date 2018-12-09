@@ -50,12 +50,10 @@ bool IsValid(RobotProfile *profile) {
 
 void EncodeProfileFile(RobotProfile *profile, buffer *file) {
    WriteStructData(file, RobotProfile_FileHeader, s, {
-      s.robot_name_length = profile->name.length;
       s.subsystem_count = profile->subsystem_count;
       s.robot_width = profile->size.x;
       s.robot_length = profile->size.y;
    });
-   WriteString(file, profile->name);
    
    ForEachArray(i, subsystem, profile->subsystem_count, profile->subsystems, {
       WriteStructData(file, RobotProfile_SubsystemDescription, s, {
@@ -216,7 +214,7 @@ void RecieveCurrentParametersPacket(RobotProfile *profile, buffer packet) {
    UpdateProfileFile(profile);
 }
 
-void ParseProfileFile(RobotProfile *profile, buffer file) {
+void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
    MemoryArena *arena = &profile->arena;
    
    profile->state = RobotProfileState::Loaded;
@@ -224,7 +222,7 @@ void ParseProfileFile(RobotProfile *profile, buffer file) {
 
    FileHeader *file_numbers = ConsumeStruct(&file, FileHeader);
    RobotProfile_FileHeader *header = ConsumeStruct(&file, RobotProfile_FileHeader);
-   profile->name = PushCopy(arena, ConsumeString(&file, header->robot_name_length));
+   profile->name = PushCopy(arena, name);
    profile->size = V2(header->robot_width, header->robot_length);
    profile->subsystem_count = header->subsystem_count;
    profile->subsystems = PushArray(arena, RobotProfileSubsystem, header->subsystem_count);
@@ -274,7 +272,103 @@ void ParseProfileFile(RobotProfile *profile, buffer file) {
 void LoadProfileFile(RobotProfile *profile, string file_name) {
    buffer loaded_file = ReadEntireFile(Concat(file_name, Literal(".ncrp")));
    if(loaded_file.data != NULL) 
-      ParseProfileFile(profile, loaded_file);
+      ParseProfileFile(profile, loaded_file, file_name);
    
    FreeEntireFile(&loaded_file);
 }
+
+#ifdef INCLUDE_DRAWPROFILES 
+struct RobotProfiles {
+   RobotProfile current;
+   RobotProfile loaded; //NOTE: this is a file we're looking at
+   RobotProfile *selected; //??
+};
+
+void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncrp_files) {
+   StackLayout(full_page);
+   element *page = VerticalList(full_page);
+   
+   element *top_bar = RowPanel(page, V2(Size(page).x - 10, page_tab_height), Padding(5, 5));
+   Background(top_bar, dark_grey);
+
+   static bool selector_open = false;
+
+   if(Button(top_bar, "Open Profile", menu_button.IsSelected(selector_open)).clicked) {
+      selector_open = !selector_open;
+   }
+
+   if(selector_open) {
+      if(profiles->current.state == RobotProfileState::Connected) {
+         if(Button(page, "Connected Robot", menu_button).clicked) {
+            profiles->selected = &profiles->current;
+         }
+
+         element *divider = Panel(page, V2(Size(page->bounds).x - 40, 5), Padding(10, 0));
+         Background(divider, BLACK);
+      }
+
+      for(FileListLink *file = ncrp_files; file; file = file->next) {
+         UI_SCOPE(page->context, file);
+         
+         if((profiles->current.state == RobotProfileState::Connected) && 
+            (profiles->current.name == file->name))
+         {
+            continue;
+         }
+         
+         if(Button(page, file->name, menu_button).clicked) {
+            LoadProfileFile(&profiles->loaded, file->name);
+
+            if(IsValid(&profiles->loaded)) {
+               profiles->selected = &profiles->loaded;
+               selector_open = false;
+            }
+         }
+      }
+   } else {
+      if(profiles->selected) {
+         RobotProfile *profile = profiles->selected;
+         Label(page, profile->name, 20, BLACK);
+         
+         if(Button(page, "Load", menu_button).clicked) {
+            LoadProfileFile(&profiles->current, profile->name);
+         }
+
+         for(u32 i = 0; i < profile->subsystem_count; i++) {
+            RobotProfileSubsystem *subsystem = profile->subsystems + i;
+            element *subsystem_page = Panel(page, V2(Size(page).x - 60, 400), Padding(20, 0).Layout(ColumnLayout));
+            Background(subsystem_page, V4(0.5, 0.5, 0.5, 0.5));
+
+            Label(subsystem_page, subsystem->name, 20, BLACK);
+            
+            Label(subsystem_page, "Parameters", 20, BLACK, V2(0, 20));
+            for(u32 j = 0; j < subsystem->param_count; j++) {
+               RobotProfileParameter *param = subsystem->params + j;
+               if(param->is_array) {
+                  Label(subsystem_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
+                  for(u32 k = 0; k < param->length; k++) {
+                     Label(subsystem_page, ToString(param->values[k]), 18, BLACK, V2(40, 0));
+                  }
+               } else {
+                  Label(subsystem_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, BLACK, V2(20, 0));
+               }
+            }
+
+            Label(subsystem_page, "Commands", 20, BLACK, V2(0, 20));
+            for(u32 j = 0; j < subsystem->command_count; j++) {
+               RobotProfileCommand *command = subsystem->commands + j;
+               //TODO: icon for command->type
+               string params = (command->param_count > 0) ? command->params[0] : EMPTY_STRING;
+               for(u32 k = 1; k < command->param_count; k++) {
+                  params = Concat(params, Literal(", "), command->params[k]);
+               }
+               Label(subsystem_page, Concat(command->name, Literal("("), params, Literal(")")), 18, BLACK, V2(20, 0));  
+            }
+         }
+      } else {
+         selector_open = true;
+      }
+   }
+}
+
+#endif
