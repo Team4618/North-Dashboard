@@ -161,7 +161,9 @@ void SetRange(MultiLineGraphData *data, f32 min_time, f32 max_time) {
 
 #define MultiLineGraph(...) _MultiLineGraph(GEN_UI_ID, __VA_ARGS__)
 void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data, 
-                     v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0)) {
+                     v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0),
+                     bool immutable = false)
+{
    element *base = _Panel(id + GEN_UI_ID, parent, size, Padding(padding).Margin(margin).Layout(ColumnLayout));
    element *graph = _Panel(id + GEN_UI_ID, base, V2(size.x, size.y - 40), Layout(ColumnLayout).Captures(INTERACTION_CLICK));
    element *control_row = _Panel(id + GEN_UI_ID, base, V2(size.x, 40), Padding(0, 5).Layout(RowLayout));
@@ -173,17 +175,19 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
                                                    BLACK,
                                                    30, V2(0, 0), V2(5, 5));
    
-   if(_Button(id + GEN_UI_ID, control_row, "Clear", control_button_style).clicked) {
-      ResetMultiLineGraph(data);
-   }
+   if(!immutable) {
+      if(_Button(id + GEN_UI_ID, control_row, "Clear", control_button_style).clicked) {
+         ResetMultiLineGraph(data);
+      }
 
-   if(_Button(id + GEN_UI_ID, control_row, "Pause", control_button_style).clicked) {
-      data->automatic_max_time = false;
-   }
+      if(_Button(id + GEN_UI_ID, control_row, "Pause", control_button_style).clicked) {
+         data->automatic_max_time = false;
+      }
 
-   if(_Button(id + GEN_UI_ID, control_row, "Reset Min Time", control_button_style).clicked) {
-      SetRange(data, data->abs_max_time, data->abs_max_time);
-      data->automatic_max_time = true;
+      if(_Button(id + GEN_UI_ID, control_row, "Reset Min Time", control_button_style).clicked) {
+         SetRange(data, data->abs_max_time, data->abs_max_time);
+         data->automatic_max_time = true;
+      }
    }
 
    if(_Button(id + GEN_UI_ID, control_row, "Full Time", control_button_style).clicked) {
@@ -215,20 +219,21 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
                v2 a = GetPointFor(data, curr_graph, graph->bounds, prev_entry);
                v2 b = GetPointFor(data, curr_graph, graph->bounds, curr_entry);
                Line(graph, curr_graph->colour, highlight ? 4 : 2, a, b);
+               Rectangle(graph, RectCenterSize(b, V2(3, 3)), BLACK);
+               
                prev_entry = curr_entry;
-            }
-
-            if(highlight) {
-               //TODO: fix this, pretty sure its broken
-               rect2 bounds = graph->bounds;
-               f32 min_value = (curr_graph->unit_id == 0) ? curr_graph->min_value : data->units[curr_graph->unit_id].min_value;
-               f32 max_value = (curr_graph->unit_id == 0) ? curr_graph->max_value : data->units[curr_graph->unit_id].max_value;
-               f32 y = Size(bounds).y * (1 - ((0 - min_value) / (max_value - min_value)));
-               Line(graph, BLACK, 2, V2(bounds.min.x, y), V2(bounds.max.x, y));
             }
 
             if(is_end_block)
                break;
+         }
+
+         if(highlight) {
+            rect2 bounds = graph->bounds;
+            f32 min_value = (curr_graph->unit_id == 0) ? curr_graph->min_value : data->units[curr_graph->unit_id].min_value;
+            f32 max_value = (curr_graph->unit_id == 0) ? curr_graph->max_value : data->units[curr_graph->unit_id].max_value;
+            f32 y = Size(bounds).y * (1 - ((0 - min_value) / (max_value - min_value)));
+            Line(graph, BLACK, 2, V2(bounds.min.x, bounds.min.y + y), V2(bounds.max.x, bounds.min.y + y));
          }
       }
    }
@@ -240,11 +245,10 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
 
    f32 cursor_t = lerp(data->min_time, (cursor_x - b.min.x) / Size(b).x, data->max_time);
 
-   //TODO: fix this
-   // if(graph->became_active) {
-   //    data->dragging = true;
-   //    data->dragBeginT = cursor_t; 
-   // }
+   if(BecameActive(graph)) {
+      data->dragging = true;
+      data->dragBeginT = cursor_t; 
+   }
 
    if(!IsActive(graph)) {
       if(data->dragging) {
@@ -273,6 +277,13 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
          Label(graph, text, 20, BLACK);
       }
    }
+}
+
+#define ImmutableMultiLineGraph(...) _ImmutableMultiLineGraph(GEN_UI_ID, __VA_ARGS__)
+void _ImmutableMultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data, 
+                     v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0))
+{
+   _MultiLineGraph(id, parent, data, size, padding, margin, true);  
 }
 
 //NOTE: the "suffix" string must exist for the entire lifetime of the graph

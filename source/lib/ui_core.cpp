@@ -34,7 +34,6 @@ struct loaded_font {
    f32 baseline_from_top_over_line_height;
 };
 
-extern loaded_font test_font; //TODO: get rid of this
 glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint);
 
 enum RenderCommandType {
@@ -133,6 +132,7 @@ struct persistent_hash_link {
 struct element;
 struct UIContext {
    MemoryArena frame_arena;
+   loaded_font *font;
 
    MemoryArena persistent_arena;
    persistent_hash_link *persistent_hash[128];
@@ -140,6 +140,7 @@ struct UIContext {
    ui_id hot_e;
    ui_id new_hot_e;
 
+   ui_id last_active_e;
    ui_id active_e;
    ui_id new_active_e;   
    
@@ -235,6 +236,7 @@ element *beginFrame(v2 window_size, UIContext *context, f32 dt) {
    context->hot_e = context->new_hot_e;
    context->new_hot_e = NULL_UI_ID;
 
+   context->last_active_e = context->active_e;
    context->active_e = context->new_active_e;
    context->new_active_e = NULL_UI_ID;
    
@@ -367,15 +369,17 @@ struct ui_text_layout {
 //TODO: kerning
 //TODO: multiple lines
 ui_text_layout LayoutText(UIContext *context, string text, f32 line_height) {
+   loaded_font *font = context->font;
+   
    ui_text_layout result = {};
-   result.baseline = test_font.baseline_from_top_over_line_height * line_height;
+   result.baseline = font->baseline_from_top_over_line_height * line_height;
    result.glyph_count = text.length;
    result.glyphs = PushTempArray(ui_glyph_layout, text.length);
 
    f32 x = 0;
    for(u32 i = 0; i < text.length; i++) {
       ui_glyph_layout *glyph_layout = result.glyphs + i;
-      glyph_texture *glyph = getOrLoadGlyph(&test_font, text.text[i]);
+      glyph_texture *glyph = getOrLoadGlyph(font, text.text[i]);
       
       v2 size = line_height * glyph->size_over_line_height;
       f32 xadvance = line_height * glyph->xadvance_over_line_height;
@@ -476,6 +480,11 @@ bool IsActive(element *e) {
    return e->id == e->context->active_e;
 }
 
+bool BecameActive(element *e) {
+   AssertHasFlags(e->captures, INTERACTION_ACTIVE);
+   return IsActive(e) && (e->id != e->context->last_active_e);
+}
+
 bool WasClicked(element *e) {
    AssertHasFlags(e->captures, INTERACTION_CLICK);
    return e->id == e->context->clicked_e;
@@ -554,14 +563,14 @@ void uiTick(element *e) {
    }
 
    if(e->captures & _INTERACTION_VERTICAL_SCROLL) {
-      if(IsHot(e)) {
+      if(ContainsCursor(e)) {
          context->new_vscroll_e = e->id;
          context->new_vscroll = input->vscroll;
       }
    }
 
    if(e->captures & _INTERACTION_HORIZONTAL_SCROLL) {
-      if(IsHot(e)) {
+      if(ContainsCursor(e)) {
          context->new_hscroll_e = e->id;
          context->new_hscroll = input->hscroll;
       }

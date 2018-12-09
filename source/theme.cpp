@@ -11,12 +11,12 @@ button_style menu_button = ButtonStyle(
    off_white,
    40, V2(0, 0), V2(0, 0));
 texture logoTexture;
-loaded_font test_font;
+loaded_font theme_font;
 
 void initTheme() {
    logoTexture = loadTexture("logo.png", true);
-   test_font = loadFont(ReadEntireFile("OpenSans-Regular.ttf", true), 
-                        PlatformAllocArena(Megabyte(5)));
+   theme_font = loadFont(ReadEntireFile("OpenSans-Regular.ttf", true), 
+                         PlatformAllocArena(Megabyte(5)));
 }
 
 // element *_MyLabel(ui_id id, element *parent, string text, f32 line_height, 

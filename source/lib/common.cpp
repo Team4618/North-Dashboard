@@ -874,6 +874,27 @@ u32 arena_blocks_allocated = 0;
          }
       }
 
+      struct Timer {
+         LARGE_INTEGER frequency;
+         LARGE_INTEGER timer;
+      };
+
+      Timer InitTimer() {
+         Timer result = {};
+         QueryPerformanceFrequency(&result.frequency); 
+         QueryPerformanceCounter(&result.timer);
+         return result;
+      }
+
+      f32 GetDT(Timer *timer) {
+         LARGE_INTEGER new_time;
+         QueryPerformanceCounter(&new_time);
+         f32 dt = (f32)(new_time.QuadPart - timer->timer.QuadPart) / (f32)timer->frequency.QuadPart;
+         timer->timer = new_time;
+         
+         return dt;
+      }
+
    #else
       #error "we dont support that platform yet"
    #endif

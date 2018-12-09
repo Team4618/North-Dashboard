@@ -787,8 +787,8 @@ void endFrame(ui_impl_win32_window *window, element *root) {
       debug_root->cliprect = RectMinSize(V2(0, 0), window->size);
       ColumnLayout(debug_root);
       
-      Label(debug_root, Concat(Literal("Time: "), ToString((f32) context->curr_time)), 60, BLACK);
-      Label(debug_root, Concat(Literal("FPS: "), ToString((f32) context->fps)), 60, BLACK);
+      Label(debug_root, Concat(Literal("Time: "), ToString((f32) context->curr_time)), 60, WHITE);
+      Label(debug_root, Concat(Literal("FPS: "), ToString((f32) context->fps)), 60, WHITE);
 
       //TODO: calculate this based on the sizes of the labels
       rect2 background_bounds = RectMinSize(V2(0, 0), V2(400, 400));
@@ -796,7 +796,7 @@ void endFrame(ui_impl_win32_window *window, element *root) {
       
       if(context->debug_hot_e != NULL) {
          string hot_e_loc = Literal(context->debug_hot_e->id.loc);
-         Label(debug_root, Concat(Literal("Mousing Over "), hot_e_loc), 30, BLACK);
+         Label(debug_root, Concat(Literal("Mousing Over "), hot_e_loc), 30, WHITE);
          Outline(debug_root, context->debug_hot_e->bounds, BLACK, 5);
       }
 

@@ -89,7 +89,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    ui_context.frame_arena = PlatformAllocArena(Megabyte(2));
    ui_context.persistent_arena = PlatformAllocArena(Megabyte(2));
    ui_context.filedrop_arena = PlatformAllocArena(Megabyte(2));
-   
+   ui_context.font = &theme_font;
+
    DashboardState state = {};
    initDashboard(&state);   
       
@@ -120,18 +121,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    //NOTE: test code, writes out a bunch of test files
    WriteTestFiles();
 
-   LARGE_INTEGER frequency;
-   QueryPerformanceFrequency(&frequency); 
-
-   LARGE_INTEGER timer;
-   QueryPerformanceCounter(&timer);
-
+   Timer timer = InitTimer();
+   
    while(PumpMessages(&window, &ui_context)) {
-      LARGE_INTEGER new_time;
-      QueryPerformanceCounter(&new_time);
-      f32 dt = (f32)(new_time.QuadPart - timer.QuadPart) / (f32)frequency.QuadPart;
-      timer = new_time;
-
+      f32 dt = GetDT(&timer);
       state.curr_time += dt;
 
       state.directory_changed = CheckFiles(&state.file_watcher);

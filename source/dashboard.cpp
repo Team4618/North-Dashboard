@@ -396,7 +396,7 @@ void DrawRecordings(element *full_page, DashboardState *state) {
             SubsystemRecording *subsystem = state->recording.subsystems + i;
             UI_SCOPE(page->context, subsystem);
             Label(page, subsystem->name, 20, BLACK);
-            MultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
+            ImmutableMultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
          }
 
       } else {   
