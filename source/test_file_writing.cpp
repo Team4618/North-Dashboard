@@ -125,9 +125,15 @@ void WriteTestFiles() {
       header.robot_width = 28/12;
       header.robot_length = 28/12;
       header.subsystem_count = 1;
+      header.conditional_count = 1;
       WriteStruct(&test_robot, &numbers);
       WriteStruct(&test_robot, &header);
       
+      char conditional_string[] = "cond_test";
+      u8 conditional_length = (u8) ArraySize(conditional_string) - 1;
+      WriteStruct(&test_robot, &conditional_length);
+      WriteArray(&test_robot, conditional_string, conditional_length);
+
       RobotProfile_SubsystemDescription test_subsystem = {};
       char test_subsystem_name[] = "subsystem_a";
       test_subsystem.name_length = ArraySize(test_subsystem_name) - 1;

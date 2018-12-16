@@ -6,10 +6,10 @@ v4 light_grey = V4(89/255.0, 89/255.0, 89/255.0, 1);
 v4 off_white = V4(238/255.0, 238/255.0, 238/255.0, 1);
 
 button_style menu_button = ButtonStyle(
-   dark_grey, light_grey,
+   dark_grey, light_grey, BLACK,
    light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
-   off_white,
-   40, V2(0, 0), V2(0, 0));
+   off_white, light_grey,
+   page_tab_height, V2(0, 0), V2(0, 0));
 texture logoTexture;
 loaded_font theme_font;
 

@@ -14,12 +14,13 @@ struct AutoCommand {
 struct AutoPath;
 struct AutoNode {
    v2 pos;
-   
+   AutoPath *in_path;
+
    u32 command_count;
    AutoCommand *commands;
    
    u32 path_count;
-   AutoPath *out_paths;
+   AutoPath **out_paths;
 };
 
 struct AutoContinuousEvent {
@@ -58,6 +59,7 @@ struct AutoPath {
 
 struct AutoProjectLink {
    AutoNode *starting_node;
+   f32 starting_angle;
    string name;
 
    AutoProjectLink *next;
@@ -80,14 +82,14 @@ AutoCommand CreateCommand(MemoryArena *arena, string subsystem_name, string comm
    return result;
 }
 
-void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path);
+AutoPath *ParseAutoPath(buffer *file, MemoryArena *arena);
 AutoNode *ParseAutoNode(buffer *file, MemoryArena *arena) {
    AutoNode *result = PushStruct(arena, AutoNode);
    AutonomousProgram_Node *file_node = ConsumeStruct(file, AutonomousProgram_Node);
    
    result->pos = file_node->pos;
    result->path_count = file_node->path_count;
-   result->out_paths = PushArray(arena, AutoPath, file_node->path_count);
+   result->out_paths = PushArray(arena, AutoPath *, file_node->path_count);
    result->command_count = file_node->command_count;
    result->commands = PushArray(arena, AutoCommand, result->command_count);
 
@@ -100,17 +102,21 @@ AutoNode *ParseAutoNode(buffer *file, MemoryArena *arena) {
    }
    
    for(u32 i = 0; i < file_node->path_count; i++) {
-      AutoPath *path = result->out_paths + i;
-      ParseAutoPath(file, arena, path);
+      AutoPath *path = ParseAutoPath(file, arena);
       path->in_node = result;
+      result->out_paths[i] = path;
    }
 
    return result;
 }
 
-void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path) {
+AutoPath *ParseAutoPath(buffer *file, MemoryArena *arena) {
+   AutoPath *path = PushStruct(arena, AutoPath);
    AutonomousProgram_Path *file_path = ConsumeStruct(file, AutonomousProgram_Path);
    
+   path->in_tangent = file_path->in_tangent;
+   path->out_tangent = file_path->out_tangent;
+
    if(file_path->conditional_length == 0) {
       path->conditional = EMPTY_STRING;
    } else {
@@ -156,6 +162,8 @@ void ParseAutoPath(buffer *file, MemoryArena *arena, AutoPath *path) {
    }
 
    path->out_node = ParseAutoNode(file, arena);
+   path->out_node->in_path = path;
+   return path;
 }
 
 AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
@@ -166,6 +174,7 @@ AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
 
       AutoProjectLink *result = PushStruct(arena, AutoProjectLink);
       result->name = PushCopy(arena, file_name);
+      result->starting_angle = header->starting_angle;
       result->starting_node = ParseAutoNode(&file, arena);
       return result;
    }
@@ -195,5 +204,84 @@ void ReadProjectsStartingAt(AutoProjectList *list, u32 field_flags, v2 pos) {
    }
 }
 
-//TODO: AutoProjectLink to file
+void WriteAutoPath(buffer *file, AutoPath *path);
+void WriteAutoNode(buffer *file, AutoNode *node) {
+   WriteStructData(file, AutonomousProgram_Node, node_header, {
+      node_header.pos = node->pos;
+      node_header.command_count = node->command_count;
+      node_header.path_count = node->path_count;
+   });
+
+   ForEachArray(i, command, node->command_count, node->commands, {
+      WriteStructData(file,AutonomousProgram_Command, command_header, {
+         command_header.subsystem_name_length = command->subsystem_name.length;
+         command_header.command_name_length = command->command_name.length;
+         command_header.parameter_count = command->param_count;
+      });
+      WriteString(file, command->subsystem_name);
+      WriteString(file, command->command_name);
+      WriteArray(file, command->params, command->param_count);
+   });
+
+   ForEachArray(i, path, node->path_count, node->out_paths, {
+      WriteAutoPath(file, *path);
+   });
+}
+
+void WriteAutoPath(buffer *file, AutoPath *path) {
+   WriteStructData(file, AutonomousProgram_Path, path_header, {
+      path_header.in_tangent = path->in_tangent;
+      path_header.out_tangent = path->out_tangent;
+      path_header.is_reverse = path->is_reverse ? 1 : 0;
+      
+      path_header.conditional_length = path->conditional.length;
+      path_header.control_point_count = path->control_point_count;
+
+      path_header.velocity_datapoint_count = path->velocity_datapoint_count;
+      path_header.continuous_event_count = path->continuous_event_count;
+      path_header.discrete_event_count = path->discrete_event_count;
+   });
+   WriteString(file, path->conditional);
+   WriteArray(file, path->control_points, path->control_point_count);
+   
+   WriteArray(file, path->velocity_datapoints, path->velocity_datapoint_count);
+   ForEachArray(i, event, path->continuous_event_count, path->continuous_events, {
+      WriteStructData(file, AutonomousProgram_ContinuousEvent, event_header, {
+         event_header.subsystem_name_length = event->subsystem_name.length;
+         event_header.command_name_length = event->command_name.length;
+         event_header.datapoint_count = event->sample_count;
+      });
+      WriteString(file, event->subsystem_name);
+      WriteString(file, event->command_name);
+      WriteArray(file, event->samples, event->sample_count);
+   });
+   ForEachArray(i, event, path->discrete_event_count, path->discrete_events, {
+      WriteStructData(file, AutonomousProgram_DiscreteEvent, event_header, {
+         event_header.distance = event->distance;
+         event_header.subsystem_name_length = event->command.subsystem_name.length;
+         event_header.command_name_length = event->command.command_name.length;
+         event_header.parameter_count = event->command.param_count;
+      });
+      WriteString(file, event->command.subsystem_name);
+      WriteString(file, event->command.command_name);
+      WriteArray(file, event->command.params, event->command.param_count);
+   });
+
+   WriteAutoNode(file, path->out_node);
+}
+
+void WriteProject(AutoProjectLink *project) {
+   buffer file = PushTempBuffer(Megabyte(10));
+   
+   FileHeader file_numbers = header(AUTONOMOUS_PROGRAM_MAGIC_NUMBER, AUTONOMOUS_PROGRAM_CURR_VERSION);
+   WriteStruct(&file, &file_numbers);
+   
+   AutonomousProgram_FileHeader header = {};
+   header.starting_angle = project->starting_angle;
+   WriteStruct(&file, &header);
+
+   WriteAutoNode(&file, project->starting_node);
+   WriteEntireFile(Concat(project->name, Literal(".ncap")), file);
+}
+
 //TODO: AutoProjectLink to packet

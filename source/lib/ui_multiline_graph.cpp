@@ -170,9 +170,9 @@ void _MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
    
    Background(graph, V4(0.7, 0.7, 0.7, 1));
 
-   button_style control_button_style = ButtonStyle(V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
+   button_style control_button_style = ButtonStyle(V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
                                                    V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
-                                                   BLACK,
+                                                   BLACK, BLACK,
                                                    30, V2(0, 0), V2(5, 5));
    
    if(!immutable) {

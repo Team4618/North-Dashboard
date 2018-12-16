@@ -217,7 +217,7 @@ void DrawAutoNode(DashboardState *state, ui_field_topdown *field, AutoNode *node
    }
 
    for(u32 i = 0; i < node->path_count; i++) {
-      DrawAutoPath(state, field, node->out_paths + i, preview);
+      DrawAutoPath(state, field, node->out_paths[i], preview);
    }
 }
 
@@ -259,7 +259,7 @@ void DrawHome(element *full_page, DashboardState *state) {
       RobotProfile *profile = &state->profiles.current;
       
       ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size,
-                                            Size(page->bounds).x);
+                                            Clamp(0, Size(page->bounds).x, 700));
 
       v2 robot_size_px =  FeetToPixels(&field, profile->size);
       for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
@@ -374,7 +374,7 @@ void DrawRecordings(element *full_page, DashboardState *state) {
       if(state->recording.loaded) {
          if(state->settings.field.loaded) {
             ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
-                                                Size(page->bounds).x);
+                                                  Clamp(0, Size(page->bounds).x, 700));
 
             for(s32 i = 0; i < state->recording.robot_sample_count; i++) {
                RobotRecording_RobotStateSample *sample = state->recording.robot_samples + i;
@@ -420,7 +420,7 @@ void DrawUI(element *root, DashboardState *state) {
    Background(root, light_grey);
    Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
    
-   if(root->context->debug_mode) {
+   if(root->context->debug_mode != UIDebugMode_Disabled) {
       Line(root, RED, 10, V2(40, 100), V2(500, 140), V2(650, 200));
       Rectangle(root, RectCenterSize(V2(40, 100), V2(5, 5)), BLACK);
       Rectangle(root, RectCenterSize(V2(500, 140), V2(5, 5)), BLACK);

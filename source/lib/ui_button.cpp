@@ -7,12 +7,14 @@ enum button_visual_flags {
 struct button_style {
    v4 colour;
    v4 selected_colour;
+   v4 disabled_colour;
 
    v4 outline;
    v4 hot_outline;
    v4 active_outline;
 
    v4 text_colour;
+   v4 disabled_text_colour;
 
    f32 height;
    v2 padding;
@@ -31,21 +33,29 @@ struct button_style {
       result.flags |= (enabled ? 0 : BUTTON_DISABLED);
       return result;
    }
+
+   button_style Padding(f32 x, f32 y) {
+      button_style result = *this;
+      result.padding = V2(x, y);
+      return result;
+   }
 };
 
-button_style ButtonStyle(v4 colour, v4 selected_colour, 
+button_style ButtonStyle(v4 colour, v4 selected_colour, v4 disabled_colour, 
                          v4 outline, v4 hot_outline, v4 active_outline, 
-                         v4 text_colour,
+                         v4 text_colour, v4 disabled_text_colour,
                          f32 height, v2 padding, v2 margin) {
    button_style result = {};
    result.colour = colour;
    result.selected_colour = selected_colour;
+   result.disabled_colour = disabled_colour;
    
    result.outline = outline;
    result.hot_outline = hot_outline;
    result.active_outline = active_outline;
    
    result.text_colour = text_colour;
+   result.disabled_text_colour = disabled_text_colour;
 
    result.height = height;
    result.padding = padding;
@@ -69,8 +79,15 @@ ui_button _Button(ui_id id, element *parent, string text, button_style style) {
    element *e = _Panel(id, parent, V2(width, style.height), Padding(style.padding).Margin(style.margin).Captures(INTERACTION_CLICK));
    bool disabled = style.flags & BUTTON_DISABLED;
 
-   Background(e, (style.flags & BUTTON_SELECTED) ? style.selected_colour : style.colour);
-   Text(e, text, e->bounds.min, Size(e->bounds).y, style.text_colour);
+   if(disabled) {
+      Background(e, style.disabled_colour);
+   } else if (style.flags & BUTTON_SELECTED) {
+      Background(e, style.selected_colour);
+   } else {
+      Background(e, style.colour);
+   }
+
+   Text(e, text, e->bounds.min, Size(e->bounds).y, disabled ? style.disabled_text_colour : style.text_colour);
    
    if(IsActive(e) && !disabled) {
       Outline(e, style.active_outline);

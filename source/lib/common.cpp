@@ -158,42 +158,74 @@ bool IsUInt(string s) {
 
 struct MemoryArenaBlock {
    MemoryArenaBlock *next;
+   
    u64 size;
    u64 used;
    u8 *memory;
 };
 
-typedef MemoryArenaBlock *(*allocator_callback)(u64 size);
-
 struct MemoryArena {
-   allocator_callback allocator;
+   u64 initial_size;
+
+   bool valid;
+   MemoryArena *parent;
+   MemoryArenaBlock *latest_block;
+   u64 latest_used;
+   
    MemoryArenaBlock *first_block;
    MemoryArenaBlock *curr_block;
-   u64 initial_size;
 };
 
+MemoryArenaBlock *PlatformAllocArenaBlock(u64 size);
 u8 *PushSize(MemoryArena *arena, u64 size) {
+   Assert(arena->valid);
+
    MemoryArenaBlock *curr_block = arena->curr_block;
    if((curr_block->size - curr_block->used) <= size) {
       if(curr_block->next == NULL) {
          //TODO: what size should we allocate?
-         MemoryArenaBlock *new_block = arena->allocator(Max(arena->initial_size, size));
+         MemoryArenaBlock *new_block = PlatformAllocArenaBlock(Max(arena->initial_size, size));
+         
          curr_block->next = new_block;
          arena->curr_block = new_block;
       } else {
          arena->curr_block = curr_block->next; 
       }
-
-      //TODO: this could technically get stuck in a loop, we need to test this new system
-      //the old one was super simple and this one isnt so much
-      return PushSize(arena, size);
-   } else {
-      u8 *result = curr_block->memory + curr_block->used;
-      curr_block->used += size;
-      _Zero(result, size);
-   
-      return result;
    }
+
+   u8 *result = curr_block->memory + curr_block->used;
+   curr_block->used += size;
+   _Zero(result, size);
+
+   return result;
+}
+
+MemoryArena BeginTemp(MemoryArena *arena) {
+   MemoryArena result = {};
+   result.initial_size = arena->initial_size;
+   result.first_block = arena->first_block;
+   result.curr_block = arena->curr_block;
+
+   result.valid = true;
+   result.parent = arena;
+   result.latest_block = arena->curr_block;
+   result.latest_used = arena->curr_block->used;
+
+   arena->valid = false;
+   return result;
+}
+
+void EndTemp(MemoryArena *temp) {
+   temp->latest_block->used = temp->latest_used;
+   for(MemoryArenaBlock *block = temp->latest_block->next;
+       block; block = block->next)
+   {
+      block->used = 0;
+   } 
+
+   temp->valid = false;
+   temp->parent->curr_block = temp->latest_block;
+   temp->parent->valid = true;
 }
 
 #define PushStruct(arena, struct) (struct *) PushSize(arena, sizeof(struct))
@@ -282,16 +314,23 @@ void WriteString(buffer *b, string str) {
 
 MemoryArena __temp_arena;
 
+struct TempArena {
+   MemoryArena arena;
+
+   TempArena(MemoryArena *_arena = &__temp_arena) {
+      arena = BeginTemp(_arena);
+   } 
+
+   ~TempArena() {
+      EndTemp(&arena);
+   }
+};
+
 #define PushTempSize(size) PushSize(&__temp_arena, (size))
 #define PushTempStruct(struct) (struct *) PushSize(&__temp_arena, sizeof(struct))
 #define PushTempArray(struct, length) (struct *) PushSize(&__temp_arena, (length) * sizeof(struct))
 #define PushTempCopy(string) PushCopy(&__temp_arena, (string))
 #define PushTempBuffer(size) PushBuffer(&__temp_arena, (size))
-
-//TODO: make the temp memory stuff a bit more advanced, eg. scope local temp arenas
-// struct TempArena {
-//    MemoryArenaBlock *
-// };
 
 //--------------REWRITE THIS ASAP-----------------
 //------------------------------------------------
@@ -411,6 +450,10 @@ f32 lerp(f32 a, f32 t, f32 b) {
    return a + t * (b - a);
 }
 
+f32 abs(f32 x) {
+   return (x > 0) ? x : -x;
+}
+
 union v4 {
    struct { f32 r, g, b, a; };
    struct { f32 x, y, z, w; };
@@ -512,6 +555,26 @@ v2 Normalize(v2 v) {
    return (len == 0) ? V2(0, 0) : (v / len);
 }
 
+v2 AspectRatio(v2 initial_size, v2 size_to_fit) {
+   f32 rs = size_to_fit.x / size_to_fit.y;
+   f32 ri = initial_size.x / initial_size.y; 
+   return rs > ri ? V2(initial_size.x * size_to_fit.y / initial_size.y, size_to_fit.y) : 
+                    V2(size_to_fit.x, initial_size.y * size_to_fit.x / initial_size.x);
+}
+
+f32 Dot(v2 a, v2 b) {
+   return a.x * b.x + a.y * b.y;
+}
+
+v2 Midpoint(v2 a, v2 b) {
+   return (a + b) / 2;
+}
+
+f32 DistFromLine(v2 a, v2 b, v2 p) {
+   f32 num = (a.y - b.y) * p.x - (a.x - b.x) * p.y + a.x*b.y - a.y*b.x;
+   return abs(num) / sqrtf((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+}
+
 struct rect2 {
    v2 min;
    v2 max;
@@ -591,7 +654,16 @@ inline rect2 Overlap(rect2 a, rect2 b) {
    return result;
 }
 
-//TODO union
+inline rect2 Union(rect2 a, rect2 b) {
+   rect2 result = {};
+   
+   result.min.x = Min(a.min.x, b.min.x);
+   result.min.y = Min(a.min.y, b.min.y);
+   result.max.x = Max(a.max.x, b.max.x);
+   result.max.y = Max(a.max.y, b.max.y);
+   
+   return result;
+}
 
 union mat4 {
    f32 e[16];
@@ -644,7 +716,7 @@ u32 arena_blocks_allocated = 0;
 
       //TODO: take a look at the weird memory usage
       MemoryArenaBlock *PlatformAllocArenaBlock(u64 size) {
-         //OutputDebugStringA("Allocating Arena Block\n");
+         OutputDebugStringA("Allocating Arena Block\n");
          total_size_requested += size;
          total_size_allocated += (sizeof(MemoryArenaBlock) + size);
          arena_blocks_allocated++;
@@ -652,19 +724,20 @@ u32 arena_blocks_allocated = 0;
          MemoryArenaBlock *result = (MemoryArenaBlock *) VirtualAlloc(0, sizeof(MemoryArenaBlock) + size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
          result->size = size;
          result->used = 0;
-         result->next = 0;
+         result->next = NULL;
          result->memory = (u8 *) (result + 1);
          return result;
       }
 
       MemoryArena PlatformAllocArena(u64 initial_size) {
+         OutputDebugStringA("Allocating Arena\n");
          arenas_allocated++;
          
          MemoryArena result = {};
-         result.allocator = PlatformAllocArenaBlock;
          result.first_block = PlatformAllocArenaBlock(initial_size);
          result.curr_block = result.first_block;
          result.initial_size = initial_size;
+         result.valid = true;
          return result;
       }
 
@@ -749,6 +822,7 @@ u32 arena_blocks_allocated = 0;
                new_link->next = result;
                result = new_link;
             } while(FindNextFileA(handle, &file));
+            FindClose(handle);
          }
          return result;
       }
@@ -757,7 +831,7 @@ u32 arena_blocks_allocated = 0;
          char full_path[MAX_PATH + 1];
          sprintf(full_path, "%.*s%s", exe_directory.length, exe_directory.text, path);
          
-         FILETIME last_write_time;
+         FILETIME last_write_time = {};
          HANDLE file_handle = CreateFileA(in_exe_directory ? full_path : path, GENERIC_READ, FILE_SHARE_READ,
                                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
          
@@ -845,7 +919,7 @@ u32 arena_blocks_allocated = 0;
                changed = true;
             }
          }
-
+         
          for(FileWatcherLink *curr = watcher->first_in_list;
              curr; curr = curr->next_in_list)
          {

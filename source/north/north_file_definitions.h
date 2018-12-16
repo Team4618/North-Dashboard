@@ -95,10 +95,12 @@ namespace RobotProfile_Flags {
 struct RobotProfile_FileHeader {
 #define ROBOT_PROFILE_MAGIC_NUMBER RIFF_CODE("NCRP") 
 #define ROBOT_PROFILE_CURR_VERSION 0
+   u8 conditional_count;
    u8 subsystem_count;
    f32 robot_width;
    f32 robot_length;
    u32 flags;
+   //{ u8 length; char [length]; } [conditional_count]
    //RobotProfile_SubsystemDescription [subsystem_count]
 };
 //-----------------------------------------------------------
@@ -241,7 +243,7 @@ struct AutonomousProgram_FileHeader {
 #define AUTONOMOUS_PROGRAM_MAGIC_NUMBER RIFF_CODE("NCAP") 
 #define AUTONOMOUS_PROGRAM_CURR_VERSION 0
    //TODO: linked auto projects
-
+   f32 starting_angle;
    //AutonomousProgram_Node begining_node
 };
 //-----------------------------------------------------------
