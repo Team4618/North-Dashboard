@@ -96,6 +96,10 @@ bool operator== (string a, string b) {
    return true;
 } 
 
+bool operator!=(string a, string b) {
+   return !(a == b);
+}
+
 bool IsWhitespace(char c) {
    return ((c == ' ') || (c == '\r') || (c == '\t'));
 }
@@ -164,8 +168,10 @@ struct MemoryArenaBlock {
    u8 *memory;
 };
 
+typedef MemoryArenaBlock *(*alloc_arena_block_callback)(u64 size);
 struct MemoryArena {
    u64 initial_size;
+   alloc_arena_block_callback alloc_block;
 
    bool valid;
    MemoryArena *parent;
@@ -176,23 +182,24 @@ struct MemoryArena {
    MemoryArenaBlock *curr_block;
 };
 
-MemoryArenaBlock *PlatformAllocArenaBlock(u64 size);
 u8 *PushSize(MemoryArena *arena, u64 size) {
    Assert(arena->valid);
 
    MemoryArenaBlock *curr_block = arena->curr_block;
-   if((curr_block->size - curr_block->used) <= size) {
+   if(curr_block->size <= (size + curr_block->used)) {
       if(curr_block->next == NULL) {
          //TODO: what size should we allocate?
-         MemoryArenaBlock *new_block = PlatformAllocArenaBlock(Max(arena->initial_size, size));
+         MemoryArenaBlock *new_block = arena->alloc_block(Max(arena->initial_size, size));
          
          curr_block->next = new_block;
          arena->curr_block = new_block;
       } else {
          arena->curr_block = curr_block->next; 
       }
+      curr_block = arena->curr_block;
    }
 
+   Assert(curr_block->size >= (curr_block->used + size));
    u8 *result = curr_block->memory + curr_block->used;
    curr_block->used += size;
    _Zero(result, size);
@@ -332,6 +339,25 @@ struct TempArena {
 #define PushTempCopy(string) PushCopy(&__temp_arena, (string))
 #define PushTempBuffer(size) PushBuffer(&__temp_arena, (size))
 
+MemoryArenaBlock *PushTempBlock(u64 size) {
+   MemoryArenaBlock *result = (MemoryArenaBlock *) PushSize(&__temp_arena, sizeof(MemoryArenaBlock) + size);
+   result->size = size;
+   result->used = 0;
+   result->next = NULL;
+   result->memory = (u8 *) (result + 1);
+   return result;
+}
+
+MemoryArena PushTempArena(u32 size) {
+   MemoryArena result = {};
+   result.first_block = PushTempBlock(size);
+   result.curr_block = result.first_block;
+   result.initial_size = size;
+   result.valid = true;
+   result.alloc_block = PushTempBlock;
+   return result;
+}
+
 //--------------REWRITE THIS ASAP-----------------
 //------------------------------------------------
 string Concat(string a, string b, string c = EMPTY_STRING, string d = EMPTY_STRING,
@@ -406,44 +432,6 @@ f32 Random01() {
 }
 //------------------------------------------------
 
-//-----------------HASH-STUFF---------------------
-//------------------------------------------------
-
-//NOTE: tried to do this with templates, was ugly,
-//      tried with macros, also ugly, try again later
-
-/*
-#define HashAndListPointers(type) \
-   type *next_in_list; \
-   type *next_in_hash;
-
-#define GetOrCreate(result_name, thing_pointer, constructor) \
-   {\
-      auto thing = (thing_pointer); \
-      u32 hash = Hash(name) % ArraySize(state->subsystem_hash); \
-      for(auto *curr = thing->hash[hash]; curr; curr = curr->next_in_hash) { \
-         if(curr->name == name) { \
-            result_name = curr; \
-         } \
-      } \
-      \
-      if(result == NULL) { \
-         auto *new_subsystem = PushStruct(arena, RecorderSubsystem); \
-         new_subsystem->name = PushCopy(arena, name); \
-         \
-         new_subsystem->next_in_hash = state->subsystem_hash[hash]; \
-         new_subsystem->next_in_list = state->first_subsystem; \
-         \
-         state->subsystem_hash[hash] = new_subsystem; \
-         state->first_subsystem = new_subsystem; \
-         state->subsystem_count++; \
-         result = new_subsystem; \
-      } \
-   }
-*/
-
-//------------------------------------------------
-
 #define PI32 3.141592653589793238462
 
 f32 lerp(f32 a, f32 t, f32 b) {
@@ -452,6 +440,66 @@ f32 lerp(f32 a, f32 t, f32 b) {
 
 f32 abs(f32 x) {
    return (x > 0) ? x : -x;
+}
+
+f64 abs(f64 x) {
+   return (x > 0) ? x : -x;
+}
+
+f32 ToDegrees(f32 r) {
+   return r * (180 / PI32);
+}
+
+f32 ToRadians(f32 d) {
+   return d * (PI32 / 180);
+}
+
+f32 AngleBetween(f32 angle1, f32 angle2, bool clockwise) {
+   if(angle2 > angle1) {
+      return clockwise ? (angle2 - angle1 - 360) : (angle2 - angle1);
+   } else {
+      return clockwise ? (angle2 - angle1) : (angle2 - angle1 + 360);
+   }
+}
+
+bool IsClockwiseShorter(f32 angle1, f32 angle2) {
+   if(angle2 > angle1) {
+      return abs(angle2 - angle1 - 360) < abs(angle2 - angle1);
+   } else {
+      return abs(angle2 - angle1) < abs(angle2 - angle1 + 360);
+   }
+}
+
+f32 CanonicalizeAngle_Degrees(f32 rawAngle) {
+   s32 revolutions = (s32) (rawAngle / 360);
+   f32 modPI = (rawAngle - revolutions * 360);
+   return modPI < 0 ? 360 + modPI : modPI;
+}
+
+f32 CanonicalizeAngle_Radians(f32 rawAngle) {
+   s32 revolutions = (s32) (rawAngle / (2 * PI32));
+   f32 modPI = (rawAngle - revolutions * (2 * PI32));
+   return modPI < 0 ? (2 * PI32) + modPI : modPI;
+}
+
+f32 AngleBetween_Radians(f32 angle1, f32 angle2, bool clockwise) {
+   if(angle2 > angle1) {
+      return clockwise ? (angle2 - angle1 - 2*PI32) : (angle2 - angle1);
+   } else {
+      return clockwise ? (angle2 - angle1) : (angle2 - angle1 + 2*PI32);
+   }
+}
+
+bool IsClockwiseShorter_Radians(f32 angle1, f32 angle2) {
+   if(angle2 > angle1) {
+      return abs(angle2 - angle1 - 2*PI32) < abs(angle2 - angle1);
+   } else {
+      return abs(angle2 - angle1) < abs(angle2 - angle1 + 2*PI32);
+   }
+}
+
+f32 ShortestAngleBetween_Radians(f32 a, f32 b) {
+   return AngleBetween_Radians(a, b, IsClockwiseShorter_Radians(a, b));
 }
 
 union v4 {
@@ -472,6 +520,13 @@ v4 operator* (f32 s, v4 v) {
 	output.z = v.z * s;
 	output.w = v.w * s;
    return output;
+}
+
+v4 lerp(v4 a, f32 t, v4 b) {
+   return V4(lerp(a.r, t, b.r),
+             lerp(a.g, t, b.g),
+             lerp(a.b, t, b.b), 
+             lerp(a.a, t, b.a));
 }
 
 union v2 {
@@ -545,7 +600,28 @@ v2 Perp(v2 v) {
    return V2(v.y, -v.x);
 }
 
+v2 lerp(v2 a, f32 t, v2 b) {
+   return V2(lerp(a.x, t, b.x), lerp(a.y, t, b.y));
+}
+
 #include "math.h"
+
+u32 Power(u32 base, u32 exp) {
+   u32 result = 1;
+   while(exp) {
+      if (exp & 1)
+         result *= base;
+
+      exp /= 2;
+      base *= base;
+   }
+
+   return result;
+}
+
+f32 Sign(f32 x) {
+   return x > 0 ? 1 : -1;
+}
 
 f32 Length(v2 a) { return sqrtf(a.x * a.x + a.y * a.y); }
 f32 Distance(v2 a, v2 b) { return Length(a - b); }
@@ -573,6 +649,46 @@ v2 Midpoint(v2 a, v2 b) {
 f32 DistFromLine(v2 a, v2 b, v2 p) {
    f32 num = (a.y - b.y) * p.x - (a.x - b.x) * p.y + a.x*b.y - a.y*b.x;
    return abs(num) / sqrtf((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+}
+
+v2 CubicHermiteSpline(v2 a_pos, v2 a_tan, v2 b_pos, v2 b_tan, f32 t) {
+   return (2*t*t*t - 3*t*t + 1)*a_pos + (t*t*t - 2*t*t + t)*a_tan + 
+          (-2*t*t*t + 3*t*t)*b_pos + (t*t*t - t*t)*b_tan;
+}
+
+v2 CubicHermiteSplineTangent(v2 a_pos, v2 a_tan, v2 b_pos, v2 b_tan, f32 t) {
+   return 6*t*(t - 1)*a_pos + 
+          (3*t*t - 4*t + 1)*a_tan + 
+          (6*t - 6*t*t)*b_pos + 
+          (3*t*t - 2*t)*b_tan;
+}
+
+union v3 {
+   struct { f32 r, g, b; };
+   struct { f32 x, y, z; };
+   f32 e[3];
+};
+
+v3 V3(f32 x, f32 y, f32 z) {
+   v3 result = {x, y, z};
+   return result;
+}
+
+v3 operator/ (v3 v, f32 s) {
+	v3 output = {};
+	output.x = v.x / s;
+	output.y = v.y / s;
+   output.z = v.z / s;
+	return output;
+}
+
+f32 Length(v3 a) { 
+   return sqrtf(a.x * a.x + a.y * a.y + a.z * a.z); 
+}
+
+v3 Normalize(v3 v) {
+   f32 len = Length(v);
+   return (len == 0) ? V3(0, 0, 0) : (v / len);
 }
 
 struct rect2 {
@@ -694,6 +810,141 @@ mat4 Orthographic(f32 top, f32 bottom, f32 left, f32 right, f32 nearPlane, f32 f
    return result;
 }
 
+//----------------------------------------------
+struct InterpolatingMap_Leaf {
+   f32 len;
+   
+   union {
+      v2 data_v2;
+      f32 data_f32;
+      void *data_ptr;
+   };
+};
+
+struct InterpolatingMap_Branch {
+   f32 len;
+
+   f32 greater_value;
+   f32 less_value;
+
+   union {
+      struct {
+         u32 greater_leaf;
+         u32 less_leaf;
+      };
+
+      struct {
+         InterpolatingMap_Branch *greater_branch;
+         InterpolatingMap_Branch *less_branch;
+      };
+   };
+};
+
+typedef void (*interpolation_map_callback)(InterpolatingMap_Leaf *a, InterpolatingMap_Leaf *b, f32 t, void *result);
+
+struct InterpolatingMap {
+   MemoryArena arena;
+   u32 sample_exp;
+   interpolation_map_callback lerp_callback;
+
+   InterpolatingMap_Branch *root;
+   InterpolatingMap_Branch **layers; //NOTE: has sample_exp arrays/layers in it
+   InterpolatingMap_Leaf *samples;
+};
+
+struct InterpolatingMapSamples {
+   u32 count;
+   InterpolatingMap_Leaf *data;
+   MemoryArena *arena;
+};
+
+InterpolatingMapSamples ResetMap(InterpolatingMap *map) {
+   MemoryArena *arena = &map->arena;
+   Reset(arena);
+
+   u32 sample_count = Power(2, map->sample_exp); 
+   InterpolatingMap_Leaf *samples = PushArray(arena, InterpolatingMap_Leaf, sample_count);
+   map->samples = samples;
+
+   InterpolatingMapSamples result = {sample_count, samples, arena};
+   return result;
+}
+
+void BuildMap(InterpolatingMap *map) {
+   MemoryArena *arena = &map->arena;
+
+   u32 last_layer_count = Power(2, map->sample_exp - 1);
+   InterpolatingMap_Branch *last_layer = PushArray(arena, InterpolatingMap_Branch, last_layer_count);
+   for(u32 i = 0; i < last_layer_count; i++) {
+      InterpolatingMap_Leaf *less = map->samples + (2 * i);
+      InterpolatingMap_Leaf *greater = map->samples + (2 * i + 1);
+
+      last_layer[i].less_leaf = 2 * i;
+      last_layer[i].less_value = less->len;
+      last_layer[i].greater_leaf = 2 * i + 1;
+      last_layer[i].greater_value = greater->len;
+      last_layer[i].len = (less->len + greater->len) / 2;
+   }
+   
+   u32 debug_layer_i = 0;
+   map->layers = PushArray(arena, InterpolatingMap_Branch *, map->sample_exp);
+   map->layers[debug_layer_i++] = last_layer;
+
+   for(u32 i = 1; i < map->sample_exp; i++) {
+      u32 layer_count = Power(2, map->sample_exp - i - 1);
+      InterpolatingMap_Branch *curr_layer = PushArray(arena, InterpolatingMap_Branch, layer_count);
+
+      for(u32 i = 0; i < layer_count; i++) {
+         InterpolatingMap_Branch *less = last_layer + (2 * i);
+         InterpolatingMap_Branch *greater = last_layer + (2 * i + 1);
+
+         curr_layer[i].less_branch = less;
+         curr_layer[i].less_value = less->less_value;
+         curr_layer[i].greater_branch = greater;
+         curr_layer[i].greater_value = greater->greater_value;
+         curr_layer[i].len = (less->greater_value + greater->less_value) / 2;
+      }
+
+      last_layer_count = layer_count;
+      last_layer = curr_layer;
+      map->layers[debug_layer_i++] = last_layer;
+   }
+
+   map->root = last_layer;
+}
+
+void MapLookup(InterpolatingMap *map, f32 distance, void *result) {
+   u32 sample_count = Power(2, map->sample_exp);
+   InterpolatingMap_Branch *branch = map->root;
+   for(u32 i = 0; i < (map->sample_exp - 1); i++) {
+      branch = (distance > branch->len) ? branch->greater_branch : branch->less_branch;
+   }
+
+   u32 a_i;
+   u32 b_i;
+
+   u32 center_leaf_i = (distance > branch->len) ? branch->greater_leaf : branch->less_leaf;
+   if(distance > map->samples[center_leaf_i].len) {
+      a_i = Clamp(0, sample_count - 1, center_leaf_i);
+      b_i = Clamp(0, sample_count - 1, center_leaf_i + 1);
+   } else {
+      a_i = Clamp(0, sample_count - 1, center_leaf_i - 1);
+      b_i = Clamp(0, sample_count - 1, center_leaf_i);
+   }
+
+   InterpolatingMap_Leaf *leaf_a = map->samples + a_i;
+   InterpolatingMap_Leaf *leaf_b = map->samples + b_i;
+
+   f32 t = (distance - leaf_a->len) / (leaf_b->len - leaf_a->len); 
+   map->lerp_callback(leaf_a, leaf_b, t, result);
+}
+
+void interpolation_map_v2_lerp(InterpolatingMap_Leaf *a, InterpolatingMap_Leaf *b, f32 t, void *result) {
+   *((v2 *)result) = lerp(a->data_v2, t, b->data_v2);
+}
+ 
+//----------------------------------------------
+
 string exe_directory = {};
 
 u64 total_size_requested = 0;
@@ -738,6 +989,7 @@ u32 arena_blocks_allocated = 0;
          result.curr_block = result.first_block;
          result.initial_size = initial_size;
          result.valid = true;
+         result.alloc_block = PlatformAllocArenaBlock;
          return result;
       }
 

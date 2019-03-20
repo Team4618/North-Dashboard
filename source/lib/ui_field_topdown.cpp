@@ -10,7 +10,7 @@ ui_field_topdown _FieldTopdown(ui_id id, element *parent, texture background_ima
                    v2 size_in_ft, f32 width) {
    v2 size = V2(width, size_in_ft.y  * (width / size_in_ft.x));
    f32 x_padding = (Size(parent->bounds).x - size.x) / 2;
-   element *e = _Panel(id, parent, size, Padding(x_padding, 0).Captures(INTERACTION_CLICK));
+   element *e = _Panel(id, parent, Size(size).Padding(x_padding, 0).Captures(INTERACTION_CLICK));
    Texture(e, background_image, e->bounds);
 
    ui_field_topdown result = {};
@@ -43,18 +43,6 @@ v2 FeetToPixels(ui_field_topdown *field, v2 in_ft) {
 
 v2 GetPoint(ui_field_topdown *field, v2 p_in_ft) {
    return Center(field->bounds) + FeetToPixels(field, p_in_ft);
-}
-
-v2 CubicHermiteSpline(v2 a_pos, v2 a_tan, v2 b_pos, v2 b_tan, f32 t) {
-   return (2*t*t*t - 3*t*t + 1)*a_pos + (t*t*t - 2*t*t + t)*a_tan + 
-          (-2*t*t*t + 3*t*t)*b_pos + (t*t*t - t*t)*b_tan;
-}
-
-v2 CubicHermiteSplineTangent(v2 a_pos, v2 a_tan, v2 b_pos, v2 b_tan, f32 t) {
-   return 6*t*(t - 1)*a_pos + 
-          (3*t*t - 4*t + 1)*a_tan + 
-          (6*t - 6*t*t)*b_pos + 
-          (3*t*t - 2*t)*b_tan;
 }
 
 void CubicHermiteSpline(ui_field_topdown *field, 

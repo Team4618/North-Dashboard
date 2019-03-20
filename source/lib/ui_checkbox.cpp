@@ -7,7 +7,7 @@ struct ui_checkbox {
 ui_checkbox _CheckBox(ui_id id, element *parent, bool checked,
                       v2 size, v2 p = V2(0, 0), v2 m = V2(0, 0))
 {
-   element *e = _Panel(id, parent, size, Padding(p).Margin(m).Captures(INTERACTION_CLICK));
+   element *e = _Panel(id, parent, Size(size).Padding(p).Margin(m).Captures(INTERACTION_CLICK));
    if(checked)
       Background(e, RED);
    Outline(e, BLACK);
@@ -16,6 +16,18 @@ ui_checkbox _CheckBox(ui_id id, element *parent, bool checked,
    result.e = e;
    result.clicked = WasClicked(e);
    return result;
+}
+
+ui_checkbox _CheckBox(ui_id id, element *parent, bool *value,
+                      v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0))
+{
+   
+   ui_checkbox box = _CheckBox(id, parent, *value, size, padding, margin);
+   if(box.clicked) {
+      *value = !(*value);
+   }
+
+   return box;
 }
 
 ui_checkbox _CheckBox(ui_id id, element *parent, u32 *value, u32 flag,

@@ -28,7 +28,6 @@
 #include "network.cpp"
 
 SOCKET tcp_socket;
-SOCKET udp_socket;
 bool was_connected = false;
 
 void HandleConnectionStatus(DashboardState *state) {
@@ -102,21 +101,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       ioctlsocket(tcp_socket, FIONBIO, &non_blocking);
    }
 
-   udp_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-   {
-      u_long non_blocking = true;
-      ioctlsocket(udp_socket, FIONBIO, &non_blocking);
-
-      struct sockaddr_in client_info = {};
-      client_info.sin_family = AF_INET;
-      client_info.sin_addr.s_addr = htonl(INADDR_ANY);
-      client_info.sin_port = htons(5801);
-
-      bool bound = (bind(udp_socket, (struct sockaddr *) &client_info, sizeof(client_info)) != SOCKET_ERROR);
-   }
-
-   struct sockaddr_in server_info = {};
-   
    //NOTE: test code, writes out a bunch of test files
    WriteTestFiles();
 
@@ -153,36 +137,6 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
                //TODO: what if the packet isnt fully sent yet or something
                buffer packet = PushTempBuffer(header.size);
                recv(tcp_socket, (char *) packet.data, packet.size, 0);
-
-               HandlePacket(&state, (PacketType::type) header.type, packet);
-            }
-         }
-      }
-      
-      {
-         bool has_packets = true;
-         while(has_packets) {
-            //TODO: 
-            /*
-            this is super janky, we can get half packets and stuff like that,
-            we might not even be getting 2 packets from the same persion
-            */
-            PacketHeader header = {};
-            struct sockaddr_in sender_info = {};
-            
-            u32 recv_return = recvfrom(udp_socket, (char *) &header, sizeof(header), 0,
-                                       (struct sockaddr *) &sender_info, NULL);
-            
-            if(recv_return == SOCKET_ERROR) {
-               has_packets = false;
-               s32 wsa_error = WSAGetLastError();
-
-               if((wsa_error != 0) && (wsa_error != WSAEWOULDBLOCK)) {
-                  //an actual error happened
-               }
-            } else {
-               buffer packet = PushTempBuffer(header.size);
-               recvfrom(udp_socket, (char *) packet.data, packet.size, 0, NULL, NULL);
 
                HandlePacket(&state, (PacketType::type) header.type, packet);
             }

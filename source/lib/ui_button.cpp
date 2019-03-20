@@ -71,12 +71,14 @@ struct ui_button {
 //TODO: icons in buttons
 // Should we just make buttons a layout and put elements inside them (eg. labels, icons)?
 
+//TODO: allow buttons to take a "v2 size"
+
 #define Button(...) _Button(GEN_UI_ID, __VA_ARGS__)
 ui_button _Button(ui_id id, element *parent, string text, button_style style) {
    UIContext *context = parent->context;
    InputState input = context->input_state;
    f32 width = TextWidth(context, text, style.height);
-   element *e = _Panel(id, parent, V2(width, style.height), Padding(style.padding).Margin(style.margin).Captures(INTERACTION_CLICK));
+   element *e = _Panel(id, parent, Size(width, style.height).Padding(style.padding).Margin(style.margin).Captures(INTERACTION_CLICK));
    bool disabled = style.flags & BUTTON_DISABLED;
 
    if(disabled) {
@@ -87,7 +89,7 @@ ui_button _Button(ui_id id, element *parent, string text, button_style style) {
       Background(e, style.colour);
    }
 
-   Text(e, text, e->bounds.min, Size(e->bounds).y, disabled ? style.disabled_text_colour : style.text_colour);
+   Text(e, text, e->bounds.min, Size(e).y, disabled ? style.disabled_text_colour : style.text_colour);
    
    if(IsActive(e) && !disabled) {
       Outline(e, style.active_outline);

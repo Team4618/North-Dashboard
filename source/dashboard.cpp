@@ -18,7 +18,7 @@ string ToString(North_GameMode::type mode) {
 
 enum DashboardPage {
    DashboardPage_Home,
-   DashboardPage_Subsystem,
+   DashboardPage_ConnectedRobot,
    DashboardPage_Recordings,
    DashboardPage_Robots,
    DashboardPage_Settings
@@ -37,33 +37,28 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
 
 #include "theme.cpp"
 
-#include "auto_project_utils.cpp"
 #define INCLUDE_DRAWSETTINGS
 #include "north_settings_utils.cpp"
 #include "robot_recording_utils.cpp"
 #define INCLUDE_DRAWPROFILES
 #include "robot_profile_utils.cpp"
 
-struct ConnectedParameter;
-struct ConnectedParameterValue {
-   ConnectedParameter *parent;
-   ConnectedParameterValue *next;
-   ConnectedParameterValue *prev;
-   
-   u32 index;
-   f32 value;
-};
+#include "auto_project_utils.cpp"
 
-struct ConnectedSubsystem;
+struct ConnectedGroup;
 struct ConnectedParameter {
-   ConnectedSubsystem *subsystem;
+   ConnectedGroup *group;
    string name;
    bool is_array;
 
-   ConnectedParameterValue sentinel;
+   u32 value_count;
+   f32 *values;
+
+   //NOTE: UI related stuff
+   bool collapsed;
 };
 
-struct ConnectedSubsystem {
+struct ConnectedGroup {
    //TODO: we're being super infefficient with memory right now, fix eventually
    MemoryArena param_arena;
 
@@ -74,79 +69,79 @@ struct ConnectedSubsystem {
    ConnectedParameter *params;
 };
 
-void SetParamValue(ConnectedParameterValue *param, f32 value) {
+void SetParamValue(ConnectedParameter *param, f32 value, u32 index) {
    buffer packet = PushTempBuffer(Megabyte(1));
 
-   ParameterOp_PacketHeader header = {};
-   header.type = ParameterOp_Type::SetValue;
-   header.subsystem_name_length = param->parent->subsystem->name.length;
-   header.param_name_length = param->parent->name.length;
-
-   header.index = param->index;
-   header.value = value;
-   param->value = value; 
-}
-
-void RecalculateIndicies(ConnectedParameter *param) {
-   u32 i = 0;
-   for(ConnectedParameterValue *curr = param->sentinel.next;
-       curr != &param->sentinel; curr = curr->next)
    {
-      curr->index = i++;
+      ParameterOp_PacketHeader header = {};
+      header.type = ParameterOp_Type::SetValue;
+      header.group_name_length = param->group->name.length;
+      header.param_name_length = param->name.length;
+
+      header.index = index;
+      header.value = value;
    }
+
+   param->values[index] = value; 
 }
 
-void AddParamValue(ConnectedParameter *param) {
+void AddParamValue(ConnectedParameter *param, f32 value) {
    Assert(param->is_array);
-   MemoryArena *arena = &param->subsystem->param_arena;
-   ConnectedParameterValue *sentinel = &param->sentinel;
+   // MemoryArena *arena = &param->subsystem->param_arena;
+   // ConnectedParameterValue *sentinel = &param->sentinel;
 
-   ConnectedParameterValue *new_value = PushStruct(arena, ConnectedParameterValue);
-   new_value->value = 0;
-   new_value->parent = param;
-   new_value->next = sentinel;
-   new_value->prev = sentinel->prev;
+   // ConnectedParameterValue *new_value = PushStruct(arena, ConnectedParameterValue);
+   // new_value->value = 0;
+   // new_value->parent = param;
+   // new_value->next = sentinel;
+   // new_value->prev = sentinel->prev;
 
-   new_value->next->prev = new_value;
-   new_value->prev->next = new_value; 
-   RecalculateIndicies(param);
+   // new_value->next->prev = new_value;
+   // new_value->prev->next = new_value; 
+   // RecalculateIndicies(param);
 
-   ParameterOp_PacketHeader header = {};
-   header.type = ParameterOp_Type::AddValue;
-   header.subsystem_name_length = param->subsystem->name.length;
-   header.param_name_length = param->name.length;
-   header.index = new_value->index;
-   header.value = 0;
+   // ParameterOp_PacketHeader header = {};
+   // header.type = ParameterOp_Type::AddValue;
+   // header.subsystem_name_length = param->subsystem->name.length;
+   // header.param_name_length = param->name.length;
+   // header.index = new_value->index;
+   // header.value = 0;
 }
 
-void RemoveParamValue(ConnectedParameterValue *param) {
-   Assert(param->parent->is_array);
-   ConnectedParameter *parent = param->parent;
+void RemoveParamValue(ConnectedParameter *param, u32 index) {
+   Assert(param->is_array);
+   // ConnectedParameter *parent = param->parent;
    
-   param->next->prev = param->prev;
-   param->prev->next = param->next;
-   RecalculateIndicies(param->parent);
+   // param->next->prev = param->prev;
+   // param->prev->next = param->next;
+   // RecalculateIndicies(param->parent);
 
-   ParameterOp_PacketHeader header = {};
-   header.type = ParameterOp_Type::RemoveValue;
-   header.subsystem_name_length = parent->subsystem->name.length;
-   header.param_name_length = parent->name.length;
-   header.index = param->index;
-   header.value = 0;
+   // ParameterOp_PacketHeader header = {};
+   // header.type = ParameterOp_Type::RemoveValue;
+   // header.subsystem_name_length = parent->subsystem->name.length;
+   // header.param_name_length = parent->name.length;
+   // header.index = param->index;
+   // header.value = 0;
 }
 
 struct DashboardState {
    struct {
       MemoryArena arena;
-      ConnectedSubsystem *subsystems;
-      u32 subsystem_count;
+      
+      ConnectedGroup default_group;
+      ConnectedGroup *groups;
+      u32 group_count;
+
+      //TODO: message, marker & path arena
+      //reset every time we get a new state packet
+
+      RobotRecording_RobotStateSample pos_samples[1024];
+      u32 curr_pos_sample;
+      u32 pos_sample_count;
+
+      North_GameMode::type prev_mode;
+      North_GameMode::type mode;
    } connected;
-
-   RobotRecording_RobotStateSample pos_samples[1024];
-   u32 curr_pos_sample;
-   u32 pos_sample_count;
-
-   //TODO: current auto path
 
    NorthSettings settings;
    RobotProfiles profiles;
@@ -159,12 +154,10 @@ struct DashboardState {
 
    //--------------------------------------------------------
    DashboardPage page;
-   ConnectedSubsystem *selected_subsystem; //NOTE: this doesnt survive a reconnect!!
+   
    //AutoProjectLink *selected_auto_project; //NOTE: this doesnt survive a directory change!!!
    //AutoNode *selected_auto_node; //NOTE: this doesnt survive a directory change!!!
    
-   North_GameMode::type prev_mode;
-   North_GameMode::type mode;
    //--------------------------------------------------------
 
    bool directory_changed;
@@ -229,7 +222,7 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
    } else {
       //TODO: Not a fan of having to put this in a temp array
       u32 point_count = path->control_point_count + 2;
-      AutonomousProgram_ControlPoint *all_points = PushTempArray(AutonomousProgram_ControlPoint, point_count);
+      North_HermiteControlPoint *all_points = PushTempArray(North_HermiteControlPoint, point_count);
       
       all_points[0] = { path->in_node->pos, path->in_tangent };
       all_points[point_count - 1] = { path->out_node->pos, path->out_tangent };
@@ -237,8 +230,8 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
          all_points[i + 1] = path->control_points[i];
 
       for(u32 i = 0; i < point_count - 1; i++) {
-         AutonomousProgram_ControlPoint a = all_points[i];
-         AutonomousProgram_ControlPoint b = all_points[i + 1];
+         North_HermiteControlPoint a = all_points[i];
+         North_HermiteControlPoint b = all_points[i + 1];
          
          CubicHermiteSpline(field, a.pos, a.tangent, b.pos, b.tangent, BLACK);
       }
@@ -281,13 +274,13 @@ void DrawHome(element *full_page, DashboardState *state) {
             starting_pos_selected = true;
             selected_starting_pos = *starting_pos;
 
-            ReadProjectsStartingAt(&state->auto_programs, 0, starting_pos->pos);
+            ReadProjectsStartingAt(&state->auto_programs, 0, starting_pos->pos, profile);
 
             //TODO: send starting pos to robot
          }   
       }
 
-      if(state->pos_sample_count > 0) {
+      if(state->connected.pos_sample_count > 0) {
          //TODO: draw live field tracking samples
       }
 
@@ -333,22 +326,22 @@ void DrawHome(element *full_page, DashboardState *state) {
          Label(page, "No Robot", V2(Size(page).x, 80), 50, BLACK);
    }
 
-   if(state->mode != North_GameMode::Disabled)
+   if(state->connected.mode != North_GameMode::Disabled)
    {
       Label(page, "Robot Messages", V2(Size(page).x, 80), 50, BLACK);
    }
 }
 
-void DrawSubsystem(element *page, ConnectedSubsystem *subsystem) {
-   Label(page, subsystem->name, 50, BLACK);
-   MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
+void DrawConnectedRobot(element *page, DashboardState *state) {
+   // Label(page, subsystem->name, 50, BLACK);
+   // MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
 }
 
 void DrawRecordings(element *full_page, DashboardState *state) {
    StackLayout(full_page);
    element *page = VerticalList(full_page);
    
-   element *top_bar = RowPanel(page, V2(Size(page).x - 10, page_tab_height), Padding(5, 5));
+   element *top_bar = RowPanel(page, Size(Size(page).x - 10, page_tab_height).Padding(5, 5));
    Background(top_bar, dark_grey);
    static bool selector_open = false;
 
@@ -392,12 +385,12 @@ void DrawRecordings(element *full_page, DashboardState *state) {
          //TODO: highlight robot at current slider time
          //TODO: draw vertical bar in multiline graph at t=curr_time
 
-         for(u32 i = 0; i < state->recording.subsystem_count; i++) {
-            SubsystemRecording *subsystem = state->recording.subsystems + i;
-            UI_SCOPE(page->context, subsystem);
-            Label(page, subsystem->name, 20, BLACK);
-            ImmutableMultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
-         }
+         // for(u32 i = 0; i < state->recording.subsystem_count; i++) {
+         //    SubsystemRecording *subsystem = state->recording.subsystems + i;
+         //    UI_SCOPE(page->context, subsystem);
+         //    Label(page, subsystem->name, 20, BLACK);
+         //    ImmutableMultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
+         // }
 
       } else {   
          selector_open = true;
@@ -431,20 +424,24 @@ void DrawUI(element *root, DashboardState *state) {
       reloadFiles(state);
    }
 
-   element *status_bar = RowPanel(root, V2(Size(root).x, status_bar_height));
+   element *status_bar = RowPanel(root, Size(Size(root).x, status_bar_height));
    Background(status_bar, dark_grey);
    if(state->profiles.current.state == RobotProfileState::Connected) {
       Label(status_bar, state->profiles.current.name, 20, WHITE, V2(10, 0));
-      Label(status_bar, Concat(Literal("Mode: "), ToString(state->mode)), 20, WHITE, V2(10, 0));
+      Label(status_bar, Concat(Literal("Mode: "), ToString(state->connected.mode)), 20, WHITE, V2(10, 0));
    } else if(state->profiles.current.state == RobotProfileState::Loaded) {
       Label(status_bar, Concat(state->profiles.current.name, Literal(" (loaded from file)")), 20, WHITE, V2(10, 0));
    } else {
       Label(status_bar, "No Robot", 20, WHITE, V2(5, 0));
    }
    
-   element *page_tabs = RowPanel(root, V2(Size(root).x, page_tab_height));
+   element *page_tabs = RowPanel(root, Size(Size(root).x, page_tab_height));
    Background(page_tabs, dark_grey);
    PageButton(page_tabs, "Home", DashboardPage_Home, state);
+   
+   // if()
+      PageButton(page_tabs, /*robot name*/ "Shopping Cart", DashboardPage_ConnectedRobot, state);
+   
    PageButton(page_tabs, "Recordings", DashboardPage_Recordings, state);
    PageButton(page_tabs, "Robots", DashboardPage_Robots, state);
    PageButton(page_tabs, "Settings", DashboardPage_Settings, state);
@@ -452,7 +449,7 @@ void DrawUI(element *root, DashboardState *state) {
    element *page = ColumnPanel(root, RectMinMax(root->bounds.min + V2(0, status_bar_height + page_tab_height), root->bounds.max));
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
-      case DashboardPage_Subsystem: DrawSubsystem(page, state->selected_subsystem); break;
+      case DashboardPage_ConnectedRobot: DrawConnectedRobot(page, state); break;
       case DashboardPage_Recordings: DrawRecordings(page, state); break;
       case DashboardPage_Robots: DrawProfiles(page, &state->profiles, state->ncrp_files); break;
       case DashboardPage_Settings: {
@@ -494,15 +491,15 @@ void DrawUI(element *root, DashboardState *state) {
    }
 
    //TODO: move recordings to their own thread
-   if((state->mode == North_GameMode::Autonomous) && 
-      (state->prev_mode != North_GameMode::Autonomous)) {
+   if((state->connected.mode == North_GameMode::Autonomous) && 
+      (state->connected.prev_mode != North_GameMode::Autonomous)) {
       BeginRecording(&state->auto_recorder);
    }
 
-   if((state->mode != North_GameMode::Autonomous) && 
-      (state->prev_mode == North_GameMode::Autonomous)) {
+   if((state->connected.mode != North_GameMode::Autonomous) && 
+      (state->connected.prev_mode == North_GameMode::Autonomous)) {
       EndRecording(&state->auto_recorder, Literal("auto_recording"));
    }
 
-   state->mode = state->prev_mode;
+   state->connected.mode = state->connected.prev_mode;
 }

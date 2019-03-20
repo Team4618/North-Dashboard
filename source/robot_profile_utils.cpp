@@ -1,12 +1,5 @@
 //NOTE: requires common.cpp & the north defs
 
-struct RobotProfileCommand {
-   North_CommandType::type type;
-   string name;
-   u32 param_count;
-   string *params;
-};
-
 struct RobotProfileParameter {
    string name;
    bool is_array;
@@ -17,12 +10,20 @@ struct RobotProfileParameter {
    };
 };
 
-struct RobotProfileSubsystem {
+struct RobotProfileGroup {
    string name;
-   u32 command_count;
-   RobotProfileCommand *commands;
+   bool collapsed; //NOTE: used for the UI
+
    u32 param_count;
    RobotProfileParameter *params;
+};
+
+struct RobotProfileCommand {
+   North_CommandExecutionType::type type;
+   string name;
+   u32 param_count;
+   string *params;
+   v4 colour;
 };
 
 namespace RobotProfileState {
@@ -40,8 +41,12 @@ struct RobotProfile {
    string name;
    v2 size;
    
-   u32 subsystem_count;
-   RobotProfileSubsystem *subsystems;
+   RobotProfileGroup default_group;
+   u32 group_count;
+   RobotProfileGroup *groups;
+
+   u32 command_count;
+   RobotProfileCommand *commands;
 
    u32 conditional_count;
    string *conditionals;
@@ -51,10 +56,43 @@ bool IsValid(RobotProfile *profile) {
    return profile->state != RobotProfileState::Invalid;
 }
 
+v4 ColourForName(string name) {
+   u32 hash = Hash(name);
+   v3 rgb = V3((f32)((hash << 0) & 0xFFFF) / (f32)0xFFFF, 
+               (f32)((hash << 3) & 0xFFFF) / (f32)0xFFFF,
+               (f32)((hash << 5) & 0xFFFF) / (f32)0xFFFF);
+   rgb = Normalize(rgb);
+   return V4(rgb.r, rgb.g, rgb.b, 1);
+}
+
+void EncodeGroup(RobotProfileGroup *group, buffer *file) {
+   WriteStructData(file, RobotProfile_Group, s, {
+      s.name_length = group->name.length;
+      s.parameter_count = group->param_count; 
+   });
+   WriteString(file, group->name);
+   
+   ForEachArray(j, param, group->param_count, group->params, {
+      WriteStructData(file, RobotProfile_Parameter, s, {
+         s.name_length = param->name.length; 
+         s.is_array = param->is_array;
+         s.value_count = param->is_array ? param->length : 1;
+      });
+      WriteString(file, param->name);
+      if(param->is_array) {
+         WriteArray(file, param->values, param->length);
+      } else {
+         WriteStruct(file, &param->value);
+      }
+   });
+}
+
 void EncodeProfileFile(RobotProfile *profile, buffer *file) {
    WriteStructData(file, RobotProfile_FileHeader, s, {
       s.conditional_count = profile->conditional_count;
-      s.subsystem_count = profile->subsystem_count;
+      s.group_count = profile->group_count;
+      s.command_count = profile->command_count;
+
       s.robot_width = profile->size.x;
       s.robot_length = profile->size.y;
    });
@@ -65,40 +103,22 @@ void EncodeProfileFile(RobotProfile *profile, buffer *file) {
       WriteString(file, *cond);
    });
 
-   ForEachArray(i, subsystem, profile->subsystem_count, profile->subsystems, {
-      WriteStructData(file, RobotProfile_SubsystemDescription, s, {
-         s.name_length = subsystem->name.length;
-         s.parameter_count = subsystem->param_count;
-         s.command_count = subsystem->command_count; 
-      });
-      WriteString(file, subsystem->name);
+   EncodeGroup(&profile->default_group, file);
+   ForEachArray(i, group, profile->group_count, profile->groups, {
+      EncodeGroup(group, file);
+   });
 
-      ForEachArray(j, param, subsystem->param_count, subsystem->params, {
-         WriteStructData(file, RobotProfile_Parameter, s, {
-            s.name_length = param->name.length; 
-            s.is_array = param->is_array;
-            s.value_count = param->is_array ? param->length : 1;
-         });
-         WriteString(file, param->name);
-         if(param->is_array) {
-            WriteArray(file, param->values, param->length);
-         } else {
-            WriteStruct(file, &param->value);
-         }
+   ForEachArray(j, command, profile->command_count, profile->commands, {
+      WriteStructData(file, RobotProfile_Command, s, {
+         s.name_length = command->name.length;
+         s.param_count = command->param_count;
+         s.type = (u8) command->type;
       });
-      
-      ForEachArray(j, command, subsystem->command_count, subsystem->commands, {
-         WriteStructData(file, RobotProfile_SubsystemCommand, s, {
-            s.name_length = command->name.length;
-            s.param_count = command->param_count;
-            s.type = (u8) command->type;
-         });
-         WriteString(file, command->name);
-         ForEachArray(k, param, command->param_count, command->params, {
-            u8 length = param->length;
-            WriteStruct(file, &length);
-            WriteString(file, *param);
-         });
+      WriteString(file, command->name);
+      ForEachArray(k, param, command->param_count, command->params, {
+         u8 length = param->length;
+         WriteStruct(file, &length);
+         WriteString(file, *param);
       });
    });
 }
@@ -118,8 +138,8 @@ void RecieveWelcomePacket(RobotProfile *profile, buffer packet) {
    Welcome_PacketHeader *header = ConsumeStruct(&packet, Welcome_PacketHeader);
    profile->name = PushCopy(arena, ConsumeString(&packet, header->robot_name_length));
    profile->size = V2(header->robot_width, header->robot_length);
-   profile->subsystem_count = header->subsystem_count;
-   profile->subsystems = PushArray(arena, RobotProfileSubsystem, profile->subsystem_count);
+   profile->command_count = header->command_count;
+   profile->commands = PushArray(arena, RobotProfileCommand, profile->command_count);
    profile->conditional_count = header->conditional_count;
    profile->conditionals = PushArray(arena, string, profile->conditional_count);
 
@@ -128,47 +148,43 @@ void RecieveWelcomePacket(RobotProfile *profile, buffer packet) {
       profile->conditionals[i] = PushCopy(arena, ConsumeString(&packet, len));
    }
 
-   for(u32 i = 0; i < header->subsystem_count; i++) {
-      Welcome_SubsystemDescription *desc = ConsumeStruct(&packet, Welcome_SubsystemDescription);
-      RobotProfileSubsystem *subsystem = profile->subsystems + i;
+   for(u32 j = 0; j < header->command_count; j++) {
+      Welcome_Command *command_desc = ConsumeStruct(&packet, Welcome_Command);
+      RobotProfileCommand *command = profile->commands + j;
       
-      subsystem->name = PushCopy(arena, ConsumeString(&packet, desc->name_length));
-      subsystem->command_count = desc->command_count;
-      subsystem->commands = PushArray(arena, RobotProfileCommand, subsystem->command_count);
+      command->name = PushCopy(arena, ConsumeString(&packet, command_desc->name_length));
+      command->type = (North_CommandExecutionType::type) command_desc->type;
+      command->param_count = command_desc->param_count;
+      command->params = PushArray(arena, string, command->param_count);
+      command->colour = ColourForName(command->name);
 
-      for(u32 j = 0; j < desc->command_count; j++) {
-         Welcome_SubsystemCommand *command_desc = ConsumeStruct(&packet, Welcome_SubsystemCommand);
-         RobotProfileCommand *command = subsystem->commands + j;
-         
-         command->name = PushCopy(arena, ConsumeString(&packet, command_desc->name_length));
-         command->type = (North_CommandType::type) command_desc->type;
-         command->param_count = command_desc->param_count;
-         command->params = PushArray(arena, string, command->param_count);
-
-         for(u32 k = 0; k < command->param_count; k++) {
-            u8 length = *ConsumeStruct(&packet, u8);
-            command->params[k] = PushCopy(arena, ConsumeString(&packet, length));
-         }
+      for(u32 k = 0; k < command->param_count; k++) {
+         u8 length = *ConsumeStruct(&packet, u8);
+         command->params[k] = PushCopy(arena, ConsumeString(&packet, length));
       }
    }
 
    UpdateProfileFile(profile);
 }
 
-RobotProfileSubsystem *GetSubsystem(RobotProfile *profile, string name) {
-   for(u32 i = 0; i < profile->subsystem_count; i++) {
-      RobotProfileSubsystem *subsystem = profile->subsystems + i;
-      if(subsystem->name == name) {
-         return subsystem;
+RobotProfileGroup *GetGroup(RobotProfile *profile, string name) {
+   if(name.length == 0) {
+      return &profile->default_group;
+   } else {
+      for(u32 i = 0; i < profile->group_count; i++) {
+         RobotProfileGroup *group = profile->groups + i;
+         if(group->name == name) {
+            return group;
+         }
       }
-   }
 
-   return NULL;
+      return NULL;
+   }
 }
 
-RobotProfileParameter *GetParameter(RobotProfileSubsystem *subsystem, string name) {
-   for(u32 i = 0; i < subsystem->param_count; i++) {
-      RobotProfileParameter *param = subsystem->params + i;
+RobotProfileParameter *GetParameter(RobotProfileGroup *group, string name) {
+   for(u32 i = 0; i < group->param_count; i++) {
+      RobotProfileParameter *param = group->params + i;
       if(param->name == name) {
          return param;
       }
@@ -177,58 +193,99 @@ RobotProfileParameter *GetParameter(RobotProfileSubsystem *subsystem, string nam
    return NULL;
 }
 
+RobotProfileCommand *GetCommand(RobotProfile *profile, string name) {
+   for(u32 i = 0; i < profile->command_count; i++) {
+      RobotProfileCommand *command = profile->commands + i;
+      if(command->name == name) {
+         return command;
+      }
+   }
+
+   return NULL;
+}
+
+void RecieveParamGroup(MemoryArena *arena, RobotProfile *profile, buffer *packet) {
+   CurrentParameters_Group *param_group = ConsumeStruct(packet, CurrentParameters_Group);
+   string name = ConsumeString(packet, param_group->name_length);
+   RobotProfileGroup *group = GetGroup(profile, name);
+   Assert(group != NULL);
+
+   if(group->params == NULL) {
+      //NOTE: we're getting CurrentParameters for the first time
+      
+      group->param_count = group->param_count;
+      group->params = PushArray(arena, RobotProfileParameter, group->param_count);   
+   
+      for(u32 j = 0; j < param_group->param_count; j++) {
+         RobotProfileParameter *param = group->params + j;
+         CurrentParameters_Parameter *packet_param = ConsumeStruct(packet, CurrentParameters_Parameter);
+         param->name = PushCopy(arena, ConsumeString(packet, packet_param->name_length));
+         param->is_array = packet_param->is_array;
+         f32 *values = ConsumeArray(packet, f32, param->is_array ? packet_param->value_count : 1);
+         if(param->is_array) {
+            param->length = packet_param->value_count;
+            param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
+         } else {
+            param->value = *values;
+         }
+      }
+   } else {
+      //NOTE: parameter values got changed
+
+      for(u32 j = 0; j < param_group->param_count; j++) {
+         CurrentParameters_Parameter *packet_param = ConsumeStruct(packet, CurrentParameters_Parameter);
+         string name = ConsumeString(packet, packet_param->name_length);
+         f32 *values = ConsumeArray(packet, f32, packet_param->is_array ? packet_param->value_count : 1);
+         
+         RobotProfileParameter *param = GetParameter(group, name);
+         Assert(param != NULL);
+
+         if(param->is_array) {
+            param->length = packet_param->value_count;
+            param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
+         } else {
+            param->value = *values;
+         }
+      }
+   }
+}
+
 void RecieveCurrentParametersPacket(RobotProfile *profile, buffer packet) {
    Assert(profile->state == RobotProfileState::Connected);
    MemoryArena *arena = &profile->arena;
    
    CurrentParameters_PacketHeader *header = ConsumeStruct(&packet, CurrentParameters_PacketHeader);
-   for(u32 i = 0; i < header->subsystem_count; i++) {
-      CurrentParameters_SubsystemParameters *subsystem_params = ConsumeStruct(&packet, CurrentParameters_SubsystemParameters);
-      string name = ConsumeString(&packet, subsystem_params->name_length);
-      RobotProfileSubsystem *subsystem = GetSubsystem(profile, name);
-      Assert(subsystem != NULL);
-
-      if(subsystem->params == NULL) {
-         //NOTE: we're getting CurrentParameters for the first time
-         
-         subsystem->param_count = subsystem_params->param_count;
-         subsystem->params = PushArray(arena, RobotProfileParameter, subsystem->param_count);   
-      
-         for(u32 j = 0; j < subsystem_params->param_count; j++) {
-            RobotProfileParameter *param = subsystem->params + j;
-            CurrentParameters_Parameter *packet_param = ConsumeStruct(&packet, CurrentParameters_Parameter);
-            param->name = PushCopy(arena, ConsumeString(&packet, packet_param->name_length));
-            param->is_array = packet_param->is_array;
-            f32 *values = ConsumeArray(&packet, f32, param->is_array ? packet_param->value_count : 1);
-            if(param->is_array) {
-               param->length = packet_param->value_count;
-               param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
-            } else {
-               param->value = *values;
-            }
-         }
-      } else {
-         //NOTE: parameter values got changed
-
-         for(u32 j = 0; j < subsystem_params->param_count; j++) {
-            CurrentParameters_Parameter *packet_param = ConsumeStruct(&packet, CurrentParameters_Parameter);
-            string name = ConsumeString(&packet, packet_param->name_length);
-            f32 *values = ConsumeArray(&packet, f32, packet_param->is_array ? packet_param->value_count : 1);
-            
-            RobotProfileParameter *param = GetParameter(subsystem, name);
-            Assert(param != NULL);
-
-            if(param->is_array) {
-               param->length = packet_param->value_count;
-               param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
-            } else {
-               param->value = *values;
-            }
-         }
-      }
+   
+   RecieveParamGroup(arena, profile, &packet);
+   for(u32 i = 0; i < header->group_count; i++) {
+      RecieveParamGroup(arena, profile, &packet);  
    }
 
    UpdateProfileFile(profile);
+}
+
+void ParseGroup(MemoryArena *arena, buffer *file, RobotProfileGroup *group) {
+   RobotProfile_Group *file_group = ConsumeStruct(file, RobotProfile_Group);
+   
+   group->name = PushCopy(arena, ConsumeString(file, file_group->name_length));
+   group->param_count = file_group->parameter_count;
+   group->params = PushArray(arena, RobotProfileParameter, group->param_count);
+   group->collapsed = true;
+   
+   for(u32 j = 0; j < file_group->parameter_count; j++) {
+      RobotProfile_Parameter *file_param = ConsumeStruct(file, RobotProfile_Parameter);
+      RobotProfileParameter *param = group->params + j;
+
+      param->name = PushCopy(arena, ConsumeString(file, file_param->name_length));
+      param->is_array = file_param->is_array;
+      f32 *values = ConsumeArray(file, f32, file_param->is_array ? file_param->value_count : 1);
+      if(param->is_array) {
+         param->length = file_param->value_count;
+         param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
+      } else {
+         param->value = *values;
+      }
+   }
 }
 
 void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
@@ -241,8 +298,10 @@ void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
    RobotProfile_FileHeader *header = ConsumeStruct(&file, RobotProfile_FileHeader);
    profile->name = PushCopy(arena, name);
    profile->size = V2(header->robot_width, header->robot_length);
-   profile->subsystem_count = header->subsystem_count;
-   profile->subsystems = PushArray(arena, RobotProfileSubsystem, header->subsystem_count);
+   profile->command_count = header->command_count;
+   profile->commands = PushArray(arena, RobotProfileCommand, header->command_count);
+   profile->group_count = header->group_count;
+   profile->groups = PushArray(arena, RobotProfileGroup, header->group_count);
    profile->conditional_count = header->conditional_count;
    profile->conditionals = PushArray(arena, string, header->conditional_count);
 
@@ -251,46 +310,26 @@ void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
       profile->conditionals[i] = PushCopy(arena, ConsumeString(&file, len));
    }
 
-   for(u32 i = 0; i < header->subsystem_count; i++) {
-      RobotProfile_SubsystemDescription *file_subsystem = ConsumeStruct(&file, RobotProfile_SubsystemDescription);
-      RobotProfileSubsystem *subsystem = profile->subsystems + i;
-      
-      subsystem->name = PushCopy(arena, ConsumeString(&file, file_subsystem->name_length));
-      subsystem->param_count = file_subsystem->parameter_count;
-      subsystem->params = PushArray(arena, RobotProfileParameter, subsystem->param_count);
-      subsystem->command_count = file_subsystem->command_count;
-      subsystem->commands = PushArray(arena, RobotProfileCommand, subsystem->command_count);
+   ParseGroup(arena, &file, &profile->default_group);
+   for(u32 i = 0; i < header->group_count; i++) {
+      ParseGroup(arena, &file, profile->groups + i);
+   }
 
-      for(u32 j = 0; j < file_subsystem->parameter_count; j++) {
-         RobotProfile_Parameter *file_param = ConsumeStruct(&file, RobotProfile_Parameter);
-         RobotProfileParameter *param = subsystem->params + j;
-
-         param->name = PushCopy(arena, ConsumeString(&file, file_param->name_length));
-         param->is_array = file_param->is_array;
-         f32 *values = ConsumeArray(&file, f32, file_param->is_array ? file_param->value_count : 1);
-         if(param->is_array) {
-            param->length = file_param->value_count;
-            param->values = (f32 *) PushCopy(arena, values, param->length * sizeof(f32));
-         } else {
-            param->value = *values;
-         }
-      }
-
-      for(u32 j = 0; j < file_subsystem->command_count; j++) {
-         RobotProfile_SubsystemCommand *file_command = ConsumeStruct(&file, RobotProfile_SubsystemCommand);
-         RobotProfileCommand *command = subsystem->commands + j;
+   for(u32 j = 0; j < profile->command_count; j++) {
+         RobotProfile_Command *file_command = ConsumeStruct(&file, RobotProfile_Command);
+         RobotProfileCommand *command = profile->commands + j;
          
          command->name = PushCopy(arena, ConsumeString(&file, file_command->name_length));
-         command->type = (North_CommandType::type) file_command->type;
+         command->type = (North_CommandExecutionType::type) file_command->type;
          command->param_count = file_command->param_count;
          command->params = PushArray(arena, string, command->param_count);
+         command->colour = ColourForName(command->name);
 
          for(u32 k = 0; k < file_command->param_count; k++) {
             u8 length = *ConsumeStruct(&file, u8);
             command->params[k] = PushCopy(arena, ConsumeString(&file, length));
          }
       }
-   }
 }
 
 void LoadProfileFile(RobotProfile *profile, string file_name) {
@@ -308,11 +347,42 @@ struct RobotProfiles {
    RobotProfile *selected; //??
 };
 
+void DrawProfiles_DrawGroup(element *page, RobotProfileGroup *group) {
+   UI_SCOPE(page, group);
+   element *group_page = ColumnPanel(page, Width(Size(page).x - 60).Padding(20, 0));
+   
+   button_style hide_button = ButtonStyle(
+      dark_grey, light_grey, BLACK,
+      light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
+      off_white, light_grey,
+      20, V2(0, 0), V2(0, 0));
+
+   element *top_row = RowPanel(group_page, Size(Size(group_page).x, 20));
+   Label(top_row, (group->name.length == 0) ? Literal("Default Group") : group->name, 20, BLACK);
+   if(Button(top_row, group->collapsed ? "  +  " : "  -  ", hide_button).clicked) {
+      group->collapsed = !group->collapsed;
+   }
+
+   if(!group->collapsed) {
+      for(u32 j = 0; j < group->param_count; j++) {
+         RobotProfileParameter *param = group->params + j;
+         if(param->is_array) {
+            Label(group_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
+            for(u32 k = 0; k < param->length; k++) {
+               Label(group_page, ToString(param->values[k]), 18, BLACK, V2(40, 0));
+            }
+         } else {
+            Label(group_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, BLACK, V2(20, 0));
+         }
+      }
+   }
+}
+
 void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncrp_files) {
    StackLayout(full_page);
    element *page = VerticalList(full_page);
    
-   element *top_bar = RowPanel(page, V2(Size(page).x - 10, page_tab_height), Padding(5, 5));
+   element *top_bar = RowPanel(page, Size(Size(page).x - 10, page_tab_height).Padding(5, 5));
    Background(top_bar, dark_grey);
 
    static bool selector_open = false;
@@ -327,7 +397,7 @@ void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncr
             profiles->selected = &profiles->current;
          }
 
-         element *divider = Panel(page, V2(Size(page->bounds).x - 40, 5), Padding(10, 0));
+         element *divider = Panel(page, Size(Size(page->bounds).x - 40, 5).Padding(10, 0));
          Background(divider, BLACK);
       }
 
@@ -358,36 +428,25 @@ void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncr
             LoadProfileFile(&profiles->current, profile->name);
          }
 
-         for(u32 i = 0; i < profile->subsystem_count; i++) {
-            RobotProfileSubsystem *subsystem = profile->subsystems + i;
-            element *subsystem_page = Panel(page, V2(Size(page).x - 60, 400), Padding(20, 0).Layout(ColumnLayout));
-            Background(subsystem_page, V4(0.5, 0.5, 0.5, 0.5));
+         element *params_panel = ColumnPanel(page, Width( Size(page).x ));
+         Background(params_panel, V4(0.5, 0.5, 0.5, 0.5));
+         Label(params_panel, "Params", 20, BLACK);
+         DrawProfiles_DrawGroup(params_panel, &profile->default_group);
+         for(u32 i = 0; i < profile->group_count; i++) {
+            RobotProfileGroup *group = profile->groups + i;
+            DrawProfiles_DrawGroup(params_panel, group);
+         }
+         FinalizeLayout(params_panel);
 
-            Label(subsystem_page, subsystem->name, 20, BLACK);
-            
-            Label(subsystem_page, "Parameters", 20, BLACK, V2(0, 20));
-            for(u32 j = 0; j < subsystem->param_count; j++) {
-               RobotProfileParameter *param = subsystem->params + j;
-               if(param->is_array) {
-                  Label(subsystem_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
-                  for(u32 k = 0; k < param->length; k++) {
-                     Label(subsystem_page, ToString(param->values[k]), 18, BLACK, V2(40, 0));
-                  }
-               } else {
-                  Label(subsystem_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, BLACK, V2(20, 0));
-               }
+         Label(page, "Commands", 20, BLACK);
+         for(u32 j = 0; j < profile->command_count; j++) {
+            RobotProfileCommand *command = profile->commands + j;
+            //TODO: icon for command->type
+            string params = (command->param_count > 0) ? command->params[0] : EMPTY_STRING;
+            for(u32 k = 1; k < command->param_count; k++) {
+               params = Concat(params, Literal(", "), command->params[k]);
             }
-
-            Label(subsystem_page, "Commands", 20, BLACK, V2(0, 20));
-            for(u32 j = 0; j < subsystem->command_count; j++) {
-               RobotProfileCommand *command = subsystem->commands + j;
-               //TODO: icon for command->type
-               string params = (command->param_count > 0) ? command->params[0] : EMPTY_STRING;
-               for(u32 k = 1; k < command->param_count; k++) {
-                  params = Concat(params, Literal(", "), command->params[k]);
-               }
-               Label(subsystem_page, Concat(command->name, Literal("("), params, Literal(")")), 18, BLACK, V2(20, 0));  
-            }
+            Label(page, Concat(command->name, Literal("("), params, Literal(")")), 18, BLACK, V2(20, 0));  
          }
 
          Label(page, "Conditionals", 20, BLACK, V2(0, 20));
