@@ -4,31 +4,12 @@ void PacketHandler_Welcome(buffer *packet_in, DashboardState *state) {
    
    Reset(arena);
    Welcome_PacketHeader *header = ConsumeStruct(&packet, Welcome_PacketHeader);
-   ConsumeString(&packet, header->robot_name_length);
+   string name = ConsumeString(&packet, header->robot_name_length);
 
-   // state->connected.subsystems = PushArray(arena, ConnectedSubsystem, header->subsystem_count);
-   // state->connected.subsystem_count = header->subsystem_count;
+   OutputDebugStringA(ToCString(Concat(Literal("Connected to "), name, Literal("\n"))));
 
-   // for(u32 i = 0; i < header->subsystem_count; i++) {
-   //    ConnectedSubsystem *subsystem = state->connected.subsystems + i;
-   //    Welcome_SubsystemDescription *desc = ConsumeStruct(&packet, Welcome_SubsystemDescription);
-      
-   //    subsystem->name = PushCopy(arena, ConsumeString(&packet, desc->name_length));
-   //    //TODO: this is really bad
-   //    subsystem->param_arena = PlatformAllocArena(Megabyte(1));
-   //    subsystem->diagnostics_graph = NewMultiLineGraph(PlatformAllocArena(Megabyte(10)));
 
-   //    for(u32 j = 0; j < desc->command_count; j++) {
-   //       Welcome_SubsystemCommand *command = ConsumeStruct(&packet, Welcome_SubsystemCommand);
-   //       ConsumeString(&packet, command->name_length);
-   //       for(u32 k = 0; k < command->param_count; k++) {
-   //          u8 len = *ConsumeStruct(&packet, u8);
-   //          ConsumeString(&packet, len);
-   //       }
-   //    }
-   // }
-
-   //TODO: connected_robot codepath (init ConnectedSubsystem s)
+   //TODO: connected_robot codepath 
    RecieveWelcomePacket(&state->profiles.current, *packet_in);
 }
 

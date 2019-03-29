@@ -253,6 +253,7 @@ struct RecorderGroup {
 struct RobotRecorder {
    MemoryArena arena;
    bool recording;
+   f32 latest_time;
 
    u32 sample_count;
    RobotStateSampleBlock first_sample_block;
@@ -467,17 +468,43 @@ void CheckForComplete(RecorderCompleteList *list, f32 time) {
    }
 }
 
+void CompleteAll(RecorderCompleteList *list, f32 time) {
+   RecorderMessagelike *next = list->active;
+   while(next) {
+      RecorderMessagelike *curr = next;
+      next = curr->next;
+      
+      curr->end_time = time;
+      
+      list->complete_count++;
+      curr->next = list->complete;
+      list->complete = curr;
+   }
+}
+
 void BeginRecording(RobotRecorder *state) {
    Assert(!state->recording);
    state->recording = true;
 
    Reset(&state->arena);
+   state->first_group = NULL;
+   state->group_count = 0;
+
+   _Zero((u8 *) state->group_hash, sizeof(state->group_hash));
+   ZeroStruct(&state->default_group);
+   state->default_group.state = state;
+
    ZeroStruct(&state->first_sample_block);
    state->curr_sample_block = &state->first_sample_block;
+   state->sample_count = 0;
 }
 
 //WRITING-NCRR-FILES----------------------------------
 void WriteGroup(buffer *file, RecorderGroup *group) {
+   CompleteAll(&group->messages, group->state->latest_time);
+   CompleteAll(&group->markers, group->state->latest_time);
+   CompleteAll(&group->paths, group->state->latest_time);
+   
    RobotRecording_Group group_header = {};
    group_header.name_length = group->name.length;
    group_header.diagnostic_count = group->diagnostic_count;
@@ -584,8 +611,6 @@ void EndRecording(RobotRecorder *state, string recording_name) {
       WriteGroup(&file, group);
    }
 
-   //TODO: write incomplete markers, messages & paths
-
    WriteEntireFile(Concat(recording_name, Literal(".ncrr")), file);
 }
 
@@ -641,6 +666,7 @@ void RecieveStatePacket(RobotRecorder *state, buffer packet) {
 
    State_PacketHeader *header = ConsumeStruct(&packet, State_PacketHeader);
    f32 time = header->time;
+   state->latest_time = time;
    
    if(state->curr_sample_block->count >= ArraySize(state->curr_sample_block->samples)) {
       RobotStateSampleBlock *new_sample_block = PushStruct(arena, RobotStateSampleBlock);

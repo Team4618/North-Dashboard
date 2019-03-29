@@ -51,10 +51,16 @@ void HandleConnectionStatus(DashboardState *state) {
       //TODO: check multiple possible address options
       struct sockaddr_in server_addr = {};
       server_addr.sin_family = AF_INET;
-      server_addr.sin_addr.s_addr = inet_addr("10.46.18.2"); 
+      // server_addr.sin_addr.s_addr = inet_addr("10.46.18.2");
+      server_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
       server_addr.sin_port = htons(5800);
 
       connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr));
+   } else {
+      //TODO: send to maintain connection
+
+      PacketHeader heartbeat = {0, PacketType::Heartbeat};
+      send(tcp_socket, (char *) &heartbeat, sizeof(heartbeat), 0);
    }
 }
 
@@ -135,6 +141,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
                }
             } else {
                //TODO: what if the packet isnt fully sent yet or something
+               OutputDebugStringA(ToCString(Concat(Literal("Recieved Packet, Size = "), ToString(header.size), Literal("\n") )));
+
                buffer packet = PushTempBuffer(header.size);
                recv(tcp_socket, (char *) packet.data, packet.size, 0);
 

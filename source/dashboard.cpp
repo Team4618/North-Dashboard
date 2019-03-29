@@ -382,15 +382,8 @@ void DrawRecordings(element *full_page, DashboardState *state) {
          HorizontalSlider(page, &state->recording.curr_time, state->recording.min_time, state->recording.max_time,
                         V2(Size(page->bounds).x - 40, 40), V2(20, 20));
          
-         //TODO: highlight robot at current slider time
-         //TODO: draw vertical bar in multiline graph at t=curr_time
-
-         // for(u32 i = 0; i < state->recording.subsystem_count; i++) {
-         //    SubsystemRecording *subsystem = state->recording.subsystems + i;
-         //    UI_SCOPE(page->context, subsystem);
-         //    Label(page, subsystem->name, 20, BLACK);
-         //    ImmutableMultiLineGraph(page, &subsystem->graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
-         // }
+         //TODO: draw graphs
+         //TODO: draw messagelike timeline
 
       } else {   
          selector_open = true;

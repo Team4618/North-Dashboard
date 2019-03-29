@@ -11,6 +11,8 @@ struct RobotProfileParameter {
 };
 
 struct RobotProfileGroup {
+   RobotProfileGroup *next;
+
    string name;
    bool collapsed; //NOTE: used for the UI
 
@@ -43,7 +45,7 @@ struct RobotProfile {
    
    RobotProfileGroup default_group;
    u32 group_count;
-   RobotProfileGroup *groups;
+   RobotProfileGroup *first_group;
 
    u32 command_count;
    RobotProfileCommand *commands;
@@ -65,6 +67,61 @@ v4 ColourForName(string name) {
    return V4(rgb.r, rgb.g, rgb.b, 1);
 }
 
+RobotProfileGroup *GetGroup(RobotProfile *profile, string name) {
+   if(name.length == 0) {
+      return &profile->default_group;
+   } else {
+      for(RobotProfileGroup *group = profile->first_group; 
+          group; group = group->next)
+      {
+         if(group->name == name) {
+            return group;
+         }
+      }
+
+      return NULL;
+   }
+}
+
+RobotProfileGroup *GetOrCreateGroup(RobotProfile *profile, string name) {
+   RobotProfileGroup *result = GetGroup(profile, name);
+   
+   if(result == NULL) {
+      MemoryArena *arena = &profile->arena;
+      result = PushStruct(arena, RobotProfileGroup);
+      result->name = PushCopy(arena, name);
+
+      result->next = profile->first_group;
+      profile->first_group = result;
+      profile->group_count++;
+   }
+
+   return result;
+}
+
+RobotProfileParameter *GetParameter(RobotProfileGroup *group, string name) {
+   for(u32 i = 0; i < group->param_count; i++) {
+      RobotProfileParameter *param = group->params + i;
+      if(param->name == name) {
+         return param;
+      }
+   }
+
+   return NULL;
+}
+
+RobotProfileCommand *GetCommand(RobotProfile *profile, string name) {
+   for(u32 i = 0; i < profile->command_count; i++) {
+      RobotProfileCommand *command = profile->commands + i;
+      if(command->name == name) {
+         return command;
+      }
+   }
+
+   return NULL;
+}
+
+//File-Writing-------------------------------------
 void EncodeGroup(RobotProfileGroup *group, buffer *file) {
    WriteStructData(file, RobotProfile_Group, s, {
       s.name_length = group->name.length;
@@ -88,6 +145,9 @@ void EncodeGroup(RobotProfileGroup *group, buffer *file) {
 }
 
 void EncodeProfileFile(RobotProfile *profile, buffer *file) {
+   FileHeader magic_numbers = header(ROBOT_PROFILE_MAGIC_NUMBER, ROBOT_PROFILE_CURR_VERSION);
+   WriteStruct(file, &magic_numbers);
+   
    WriteStructData(file, RobotProfile_FileHeader, s, {
       s.conditional_count = profile->conditional_count;
       s.group_count = profile->group_count;
@@ -104,9 +164,9 @@ void EncodeProfileFile(RobotProfile *profile, buffer *file) {
    });
 
    EncodeGroup(&profile->default_group, file);
-   ForEachArray(i, group, profile->group_count, profile->groups, {
+   for(RobotProfileGroup *group = profile->first_group; group; group = group->next) {
       EncodeGroup(group, file);
-   });
+   }
 
    ForEachArray(j, command, profile->command_count, profile->commands, {
       WriteStructData(file, RobotProfile_Command, s, {
@@ -129,6 +189,7 @@ void UpdateProfileFile(RobotProfile *profile) {
    WriteEntireFile(Concat(profile->name, Literal(".ncrp")), file);
 }
 
+//Packet-Parsing-------------------------------------
 void RecieveWelcomePacket(RobotProfile *profile, buffer packet) {
    MemoryArena *arena = &profile->arena;
    
@@ -167,53 +228,16 @@ void RecieveWelcomePacket(RobotProfile *profile, buffer packet) {
    UpdateProfileFile(profile);
 }
 
-RobotProfileGroup *GetGroup(RobotProfile *profile, string name) {
-   if(name.length == 0) {
-      return &profile->default_group;
-   } else {
-      for(u32 i = 0; i < profile->group_count; i++) {
-         RobotProfileGroup *group = profile->groups + i;
-         if(group->name == name) {
-            return group;
-         }
-      }
-
-      return NULL;
-   }
-}
-
-RobotProfileParameter *GetParameter(RobotProfileGroup *group, string name) {
-   for(u32 i = 0; i < group->param_count; i++) {
-      RobotProfileParameter *param = group->params + i;
-      if(param->name == name) {
-         return param;
-      }
-   }
-
-   return NULL;
-}
-
-RobotProfileCommand *GetCommand(RobotProfile *profile, string name) {
-   for(u32 i = 0; i < profile->command_count; i++) {
-      RobotProfileCommand *command = profile->commands + i;
-      if(command->name == name) {
-         return command;
-      }
-   }
-
-   return NULL;
-}
-
 void RecieveParamGroup(MemoryArena *arena, RobotProfile *profile, buffer *packet) {
    CurrentParameters_Group *param_group = ConsumeStruct(packet, CurrentParameters_Group);
    string name = ConsumeString(packet, param_group->name_length);
-   RobotProfileGroup *group = GetGroup(profile, name);
+   RobotProfileGroup *group = GetOrCreateGroup(profile, name);
    Assert(group != NULL);
 
    if(group->params == NULL) {
       //NOTE: we're getting CurrentParameters for the first time
       
-      group->param_count = group->param_count;
+      group->param_count = param_group->param_count;
       group->params = PushArray(arena, RobotProfileParameter, group->param_count);   
    
       for(u32 j = 0; j < param_group->param_count; j++) {
@@ -264,10 +288,11 @@ void RecieveCurrentParametersPacket(RobotProfile *profile, buffer packet) {
    UpdateProfileFile(profile);
 }
 
-void ParseGroup(MemoryArena *arena, buffer *file, RobotProfileGroup *group) {
+void ParseGroup(MemoryArena *arena, buffer *file, RobotProfile *profile) {
    RobotProfile_Group *file_group = ConsumeStruct(file, RobotProfile_Group);
-   
-   group->name = PushCopy(arena, ConsumeString(file, file_group->name_length));
+   string name = ConsumeString(file, file_group->name_length);
+
+   RobotProfileGroup *group = GetOrCreateGroup(profile, name);
    group->param_count = file_group->parameter_count;
    group->params = PushArray(arena, RobotProfileParameter, group->param_count);
    group->collapsed = true;
@@ -292,16 +317,19 @@ void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
    MemoryArena *arena = &profile->arena;
    
    profile->state = RobotProfileState::Loaded;
+   profile->first_group = NULL;
+   ZeroStruct(&profile->default_group);
    Reset(arena);
 
    FileHeader *file_numbers = ConsumeStruct(&file, FileHeader);
+   Assert(file_numbers->magic_number == ROBOT_PROFILE_MAGIC_NUMBER);
+   Assert(file_numbers->version_number == ROBOT_PROFILE_CURR_VERSION);
+
    RobotProfile_FileHeader *header = ConsumeStruct(&file, RobotProfile_FileHeader);
    profile->name = PushCopy(arena, name);
    profile->size = V2(header->robot_width, header->robot_length);
    profile->command_count = header->command_count;
    profile->commands = PushArray(arena, RobotProfileCommand, header->command_count);
-   profile->group_count = header->group_count;
-   profile->groups = PushArray(arena, RobotProfileGroup, header->group_count);
    profile->conditional_count = header->conditional_count;
    profile->conditionals = PushArray(arena, string, header->conditional_count);
 
@@ -310,9 +338,9 @@ void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
       profile->conditionals[i] = PushCopy(arena, ConsumeString(&file, len));
    }
 
-   ParseGroup(arena, &file, &profile->default_group);
+   ParseGroup(arena, &file, profile);
    for(u32 i = 0; i < header->group_count; i++) {
-      ParseGroup(arena, &file, profile->groups + i);
+      ParseGroup(arena, &file, profile);
    }
 
    for(u32 j = 0; j < profile->command_count; j++) {
@@ -332,6 +360,7 @@ void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
       }
 }
 
+//File-Reading----------------------------------------
 void LoadProfileFile(RobotProfile *profile, string file_name) {
    buffer loaded_file = ReadEntireFile(Concat(file_name, Literal(".ncrp")));
    if(loaded_file.data != NULL) 
@@ -340,6 +369,7 @@ void LoadProfileFile(RobotProfile *profile, string file_name) {
    FreeEntireFile(&loaded_file);
 }
 
+//UI--------------------------------------------------
 #ifdef INCLUDE_DRAWPROFILES 
 struct RobotProfiles {
    RobotProfile current;
@@ -395,6 +425,7 @@ void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncr
       if(profiles->current.state == RobotProfileState::Connected) {
          if(Button(page, "Connected Robot", menu_button).clicked) {
             profiles->selected = &profiles->current;
+            selector_open = false;
          }
 
          element *divider = Panel(page, Size(Size(page->bounds).x - 40, 5).Padding(10, 0));
@@ -424,7 +455,7 @@ void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncr
          RobotProfile *profile = profiles->selected;
          Label(page, profile->name, 20, BLACK);
          
-         if(Button(page, "Load", menu_button).clicked) {
+         if(Button(page, "Load", menu_button.IsEnabled(profiles->current.name != profile->name)).clicked) {
             LoadProfileFile(&profiles->current, profile->name);
          }
 
@@ -432,8 +463,9 @@ void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncr
          Background(params_panel, V4(0.5, 0.5, 0.5, 0.5));
          Label(params_panel, "Params", 20, BLACK);
          DrawProfiles_DrawGroup(params_panel, &profile->default_group);
-         for(u32 i = 0; i < profile->group_count; i++) {
-            RobotProfileGroup *group = profile->groups + i;
+         for(RobotProfileGroup *group = profile->first_group;
+             group; group = group->next)
+         {  
             DrawProfiles_DrawGroup(params_panel, group);
          }
          FinalizeLayout(params_panel);

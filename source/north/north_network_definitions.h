@@ -3,19 +3,22 @@
 //NOTE: Everything is sent over TCP socket 5800 
 
 struct PacketHeader {
-   u32 size; //NOTE: this lets packets be really big, our practical limit is much smaller than the 4 gb limit
+   //NOTE: this lets packets be really big, our practical limit is much smaller than the 4 gb limit
+   //NOTE: this size excludes the 5 byte header
+   u32 size;
    u8 type; 
 };
 
 namespace PacketType {
    enum type {
-      SetConnectionFlags = 1,    // ->
+      Heartbeat = 0,             // <->
+      SetConnectionFlags = 1,    //  ->
       Welcome = 2,               // <-
       CurrentParameters = 3,     // <-
       State = 4,                 // <-
-      ParameterOp = 5,           // ->
-      SetState = 6,              // ->
-      UploadAutonomous = 7,      // ->
+      ParameterOp = 5,           //  ->
+      SetState = 6,              //  ->
+      UploadAutonomous = 7,      //  ->
       //NOTE: if we change a packet just make a new type instead 
       //eg. "Welcome" becomes "Welcome_V1" & we create "Welcome_V2"
    };
