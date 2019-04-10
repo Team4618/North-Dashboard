@@ -1,6 +1,9 @@
 //NOTE: requires common.cpp & the north defs
 
+struct RobotProfileGroup;
 struct RobotProfileParameter {
+   RobotProfileGroup *group;
+
    string name;
    bool is_array;
    u32 length; //ignored if is_array is false
@@ -243,7 +246,9 @@ void RecieveParamGroup(MemoryArena *arena, RobotProfile *profile, buffer *packet
       for(u32 j = 0; j < param_group->param_count; j++) {
          RobotProfileParameter *param = group->params + j;
          CurrentParameters_Parameter *packet_param = ConsumeStruct(packet, CurrentParameters_Parameter);
+         
          param->name = PushCopy(arena, ConsumeString(packet, packet_param->name_length));
+         param->group = group;
          param->is_array = packet_param->is_array;
          f32 *values = ConsumeArray(packet, f32, param->is_array ? packet_param->value_count : 1);
          if(param->is_array) {
@@ -365,8 +370,43 @@ void LoadProfileFile(RobotProfile *profile, string file_name) {
    buffer loaded_file = ReadEntireFile(Concat(file_name, Literal(".ncrp")));
    if(loaded_file.data != NULL) 
       ParseProfileFile(profile, loaded_file, file_name);
-   
-   FreeEntireFile(&loaded_file);
+}
+
+buffer MakeParamOpPacket(RobotProfileParameter *param, ParameterOp_Type::type type, f32 value, u32 index) {
+   buffer packet = PushTempBuffer(Kilobyte(10));
+
+   u32 size = sizeof(ParameterOp_PacketHeader) + param->group->name.length + param->name.length;
+   PacketHeader p_header = { size, (u8)PacketType::ParameterOp };
+
+   ParameterOp_PacketHeader header = {};
+   header.type = (u8) type;
+   header.group_name_length = param->group->name.length;
+   header.param_name_length = param->name.length;
+
+   header.value = value;
+   header.index = index;
+
+   WriteStruct(&packet, &p_header);
+   WriteStruct(&packet, &header);
+   WriteString(&packet, param->group->name);
+   WriteString(&packet, param->name);
+
+   return packet;
+}
+
+void SendParamSetValue(RobotProfileParameter *param, f32 value, u32 index = 0) {
+   buffer packet = MakeParamOpPacket(param, ParameterOp_Type::SetValue, value, index);
+   SendPacket(packet);
+}
+
+void SendParamRemoveValue(RobotProfileParameter *param, u32 index) {
+   buffer packet = MakeParamOpPacket(param, ParameterOp_Type::RemoveValue, 0, index);
+   SendPacket(packet);
+}
+
+void SendParamAddValue(RobotProfileParameter *param, f32 value) {
+   buffer packet = MakeParamOpPacket(param, ParameterOp_Type::AddValue, value, 0);
+   SendPacket(packet);
 }
 
 //UI--------------------------------------------------
@@ -377,7 +417,59 @@ struct RobotProfiles {
    RobotProfile *selected; //??
 };
 
-void DrawProfiles_DrawGroup(element *page, RobotProfileGroup *group) {
+void DrawProfiles_DrawParam(element *group_page, RobotProfile *profile, RobotProfileParameter *param) {
+   UI_SCOPE(group_page, param);
+
+   button_style hide_button = ButtonStyle(
+      dark_grey, light_grey, BLACK,
+      light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
+      off_white, light_grey,
+      20, V2(0, 0), V2(0, 0));
+
+   if(profile->state == RobotProfileState::Connected) {
+      if(param->is_array) {
+         Label(group_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
+         for(u32 i = 0; i < param->length; i++) {
+            UI_SCOPE(group_page, i);
+
+            element *param_row = RowPanel(group_page, Size(Size(group_page).x, 18));
+            Label(param_row, Concat(ToString(i), Literal(": ")), 18, BLACK, V2(40, 0));
+            ui_numberbox param_box = TextBox(param_row, param->values[i], 18);
+            
+            if(param_box.valid_enter) {
+               SendParamSetValue(param, param_box.f32_value, i);
+            }
+
+            if(Button(param_row, "Remove", hide_button.Padding(5, 0).IsEnabled(param->length > 1)).clicked) {
+               SendParamRemoveValue(param, i);
+            }   
+         }
+
+         if(Button(group_page, "Add", hide_button.Padding(40, 0)).clicked) {
+            SendParamAddValue(param, 0);
+         }
+      } else {
+         element *param_row = RowPanel(group_page, Size(Size(group_page).x, 18));
+         Label(param_row, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
+         ui_numberbox param_box = TextBox(param_row, param->value, 18);
+         
+         if(param_box.valid_enter) {
+            SendParamSetValue(param, param_box.f32_value);
+         }
+      }
+   } else {
+      if(param->is_array) {
+         Label(group_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
+         for(u32 i = 0; i < param->length; i++) {
+            Label(group_page, Concat(ToString(i), Literal(": "), ToString(param->values[i])), 18, BLACK, V2(40, 0));
+         }
+      } else {
+         Label(group_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, BLACK, V2(20, 0));
+      }
+   }  
+}
+
+void DrawProfiles_DrawGroup(element *page, RobotProfile *profile, RobotProfileGroup *group) {
    UI_SCOPE(page, group);
    element *group_page = ColumnPanel(page, Width(Size(page).x - 60).Padding(20, 0));
    
@@ -394,16 +486,8 @@ void DrawProfiles_DrawGroup(element *page, RobotProfileGroup *group) {
    }
 
    if(!group->collapsed) {
-      for(u32 j = 0; j < group->param_count; j++) {
-         RobotProfileParameter *param = group->params + j;
-         if(param->is_array) {
-            Label(group_page, Concat(param->name, Literal(": ")), 18, BLACK, V2(20, 0));
-            for(u32 k = 0; k < param->length; k++) {
-               Label(group_page, ToString(param->values[k]), 18, BLACK, V2(40, 0));
-            }
-         } else {
-            Label(group_page, Concat(param->name, Literal(": "), ToString(param->value)), 18, BLACK, V2(20, 0));
-         }
+      for(u32 i = 0; i < group->param_count; i++) {
+         DrawProfiles_DrawParam(group_page, profile, group->params + i);
       }
    }
 }
@@ -462,11 +546,11 @@ void DrawProfiles(element *full_page, RobotProfiles *profiles, FileListLink *ncr
          element *params_panel = ColumnPanel(page, Width( Size(page).x ));
          Background(params_panel, V4(0.5, 0.5, 0.5, 0.5));
          Label(params_panel, "Params", 20, BLACK);
-         DrawProfiles_DrawGroup(params_panel, &profile->default_group);
+         DrawProfiles_DrawGroup(params_panel, profile, &profile->default_group);
          for(RobotProfileGroup *group = profile->first_group;
              group; group = group->next)
          {  
-            DrawProfiles_DrawGroup(params_panel, group);
+            DrawProfiles_DrawGroup(params_panel, profile, group);
          }
          FinalizeLayout(params_panel);
 

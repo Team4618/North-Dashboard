@@ -61,8 +61,6 @@ void ReadSettingsFile(NorthSettings *settings) {
          settings->team_number = header->team_number;
          settings->field_name = PushCopy(&settings->arena, ConsumeString(&settings_file, header->field_name_length));
       }
-
-      FreeEntireFile(&settings_file);
    }
 
    buffer field_file = ReadEntireFile(Concat(settings->field_name, Literal(".ncff")));
@@ -91,8 +89,6 @@ void ReadSettingsFile(NorthSettings *settings) {
          u32 *image_texels = (u32 *) ConsumeSize(&field_file, header->image_width * header->image_height * sizeof(u32));
          settings->field.image = createTexture(image_texels, header->image_width, header->image_height);
       }
-
-      FreeEntireFile(&field_file);
    }
 
    settings->saved_data.team_number = settings->team_number;

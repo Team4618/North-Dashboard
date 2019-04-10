@@ -61,6 +61,7 @@ PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
 
 image ReadImage(char *path, bool in_exe_directory) {
    image result = {};
+   // TempArena temp_arena;
    buffer file = ReadEntireFile(path, in_exe_directory);
 
    if(file.data != NULL) {
@@ -71,8 +72,6 @@ image ReadImage(char *path, bool in_exe_directory) {
       result.height = height;
       result.texels = data;
       result.valid = true;
-
-      FreeEntireFile(&file);
    }
 
    return result;
@@ -184,6 +183,7 @@ loaded_font loadFont(buffer ttf_file, MemoryArena arena) {
 }
 
 GLuint loadShader(char *path, GLenum shaderType) {
+   // TempArena temp_arena;
    buffer shader_src = ReadEntireFile(path, true);
    GLuint shader = glCreateShader(shaderType);
    glShaderSource(shader, 1, (char **) &shader_src.data, (GLint *) &shader_src.size);
@@ -202,8 +202,7 @@ GLuint loadShader(char *path, GLenum shaderType) {
       glGetShaderInfoLog(shader, log_length, &log_length, compile_log);
       OutputDebugStringA(compile_log);
    }
-   
-   FreeEntireFile(&shader_src);
+
    return shader;
 }
 
@@ -342,9 +341,21 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    HGLRC temp_gl_context = wglCreateContext(gl.dc);
    wglMakeCurrent(gl.dc, temp_gl_context);
    
+   OutputDebugStringA((char *) glGetString(GL_VERSION));
+   OutputDebugStringA("\n");
+
+   string gl_version_string = Literal((char *) glGetString(GL_VERSION));
+   u32 major_version = gl_version_string.text[0] - '0';
+   u32 minor_version = gl_version_string.text[2] - '0';   
+   bool version_ok = (major_version >= 4) && (minor_version >= 5);
+   if(!version_ok) {
+      MessageBox(NULL, "Version < 4.5", "OpenGL Version Error", MB_OK);
+      Assert(false);
+   }
+
    PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB =
       (PFNWGLCREATECONTEXTATTRIBSARBPROC) wglGetProcAddress("wglCreateContextAttribsARB");
-   
+
    const int gl_attribs[] = 
    {
       WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
@@ -360,7 +371,7 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    
    OutputDebugStringA((char *) glGetString(GL_VERSION));
    OutputDebugStringA("\n");
-   
+
    glCreateVertexArrays = (PFNGLCREATEVERTEXARRAYSPROC) wglGetProcAddress("glCreateVertexArrays");
    glDeleteVertexArrays = (PFNGLDELETEVERTEXARRAYSPROC) wglGetProcAddress("glDeleteVertexArrays");
    glBindVertexArray = (PFNGLBINDVERTEXARRAYPROC) wglGetProcAddress("glBindVertexArray");
@@ -407,7 +418,10 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    glTextureParameteri = (PFNGLTEXTUREPARAMETERIPROC) wglGetProcAddress("glTextureParameteri");
 
    glDebugMessageCallback = (PFNGLDEBUGMESSAGECALLBACKPROC) wglGetProcAddress("glDebugMessageCallback");
-   glDebugMessageCallback((GLDEBUGPROC) opengl_debug_callback, NULL); //NOTE: this crashes in 32bit mode
+   if(glDebugMessageCallback != NULL) {
+      //NOTE: this crashes in 32bit mode & dans laptop
+      glDebugMessageCallback((GLDEBUGPROC) opengl_debug_callback, NULL);
+   }
    
    GLuint transformVert = loadShader("transform.vert", GL_VERTEX_SHADER);
    GLuint transformWithUVVert = loadShader("transform_UV.vert", GL_VERTEX_SHADER);

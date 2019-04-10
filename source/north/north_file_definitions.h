@@ -167,6 +167,20 @@ struct RobotRecording_RobotStateSample {
    f32 time;
 };
 
+/*
+struct RobotRecording_Chunk {
+   u32 robot_state_sample_count;
+   u8 group_count;
+
+   //RobotRecording_RobotStateSample [robot_state_sample_count]
+   
+   //RobotRecording_Group default_group
+   //RobotRecording_Group [group_count]
+}
+*/
+
+//TODO keep track of the totals somehow, like total diagnostic samples in a group
+
 struct RobotRecording_FileHeader {
 #define ROBOT_RECORDING_MAGIC_NUMBER RIFF_CODE("NCRR") 
 #define ROBOT_RECORDING_CURR_VERSION 0

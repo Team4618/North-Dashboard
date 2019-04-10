@@ -1,3 +1,5 @@
+//TODO: clean up this file, seperate into sections (eg. base types, string stuff, memory, math...)
+
 #include "stdint.h"
 typedef int8_t s8;
 typedef uint8_t u8;
@@ -182,17 +184,24 @@ struct MemoryArena {
    MemoryArenaBlock *curr_block;
 };
 
-u8 *PushSize(MemoryArena *arena, u64 size) {
+u8 *PushSize(MemoryArena *arena, u64 size, bool assert_on_empty = true) {
    Assert(arena->valid);
 
    MemoryArenaBlock *curr_block = arena->curr_block;
    if(curr_block->size <= (size + curr_block->used)) {
       if(curr_block->next == NULL) {
-         //TODO: what size should we allocate?
-         MemoryArenaBlock *new_block = arena->alloc_block(Max(arena->initial_size, size));
-         
-         curr_block->next = new_block;
-         arena->curr_block = new_block;
+         if(arena->alloc_block == NULL) {
+            if(assert_on_empty)
+               Assert(false);
+
+            return NULL;
+         } else {
+            //TODO: what size should we allocate?
+            MemoryArenaBlock *new_block = arena->alloc_block(Max(arena->initial_size, size));
+            
+            curr_block->next = new_block;
+            arena->curr_block = new_block;
+         }
       } else {
          arena->curr_block = curr_block->next; 
       }
@@ -205,6 +214,20 @@ u8 *PushSize(MemoryArena *arena, u64 size) {
    _Zero(result, size);
 
    return result;
+}
+
+bool CanAllocate(MemoryArena *arena, u64 size) {
+   if(arena->alloc_block != NULL)
+      return true;
+
+   for(MemoryArenaBlock *block = arena->curr_block; 
+       block; block = block->next)
+   {
+      if(block->size <= (size + block->used))
+         return true;
+   }
+
+   return false;
 }
 
 MemoryArena BeginTemp(MemoryArena *arena) {
@@ -238,6 +261,20 @@ void EndTemp(MemoryArena *temp) {
 #define PushStruct(arena, struct) (struct *) PushSize(arena, sizeof(struct))
 #define PushArray(arena, struct, length) (struct *) PushSize(arena, (length) * sizeof(struct))
 #define PushArrayCopy(arena, struct, first_elem, length) (struct *) PushCopy(arena, first_elem, length * sizeof(struct))
+
+MemoryArena PushArena(MemoryArena *arena, u64 size) {
+   MemoryArenaBlock *block = PushStruct(arena, MemoryArenaBlock);
+   block->size = size;
+   block->memory = PushSize(arena, size);
+   
+   MemoryArena result = {};
+   result.initial_size = size;
+   result.first_block = block;
+   result.curr_block = block;
+   result.valid = true;
+   
+   return result;
+}
 
 string PushCopy(MemoryArena *arena, string s) {
    string result = {};
@@ -358,26 +395,30 @@ MemoryArena PushTempArena(u32 size) {
    return result;
 }
 
-//--------------REWRITE THIS ASAP-----------------
 //------------------------------------------------
-string Concat(string a, string b, string c = EMPTY_STRING, string d = EMPTY_STRING,
-              string e = EMPTY_STRING, string f = EMPTY_STRING) {
-   string inputs[] = {a, b, c, d, e, f};
+//TODO: make concatenation & conversion from c-strings to len-strings nicer
+string Concat(string *inputs, u32 input_count) {
    string result = {};
    
-   for(u32 i = 0; i < ArraySize(inputs); i++) {
+   for(u32 i = 0; i < input_count; i++) {
       result.length += inputs[i].length;
    }
 
    result.text = PushTempArray(char, result.length);
    u8 *dest = (u8 *) result.text;
-   for(u32 i = 0; i < ArraySize(inputs); i++) {
+   for(u32 i = 0; i < input_count; i++) {
       string s = inputs[i];
       Copy((u8 *) s.text, s.length, dest);
       dest += s.length;
    }
 
    return result;
+}
+
+string Concat(string a, string b, string c = EMPTY_STRING, string d = EMPTY_STRING,
+              string e = EMPTY_STRING, string f = EMPTY_STRING) {
+   string inputs[] = {a, b, c, d, e, f};
+   return Concat(inputs, ArraySize(inputs));
 }
 
 #include "stdio.h"
@@ -418,6 +459,12 @@ u32 ToU32(string number) {
    char number_buffer[256] = {};
    sprintf(number_buffer, "%.*s", number.length, number.text);
    return (u32) strtol(number_buffer, NULL, 10);
+}
+
+string ToString(s32 value) {
+   char buffer[128] = {};
+   sprintf(buffer, "%i", value);
+   return PushTempCopy(Literal(buffer));
 }
 
 char *ToCString(string str) {
@@ -811,6 +858,8 @@ mat4 Orthographic(f32 top, f32 bottom, f32 left, f32 right, f32 nearPlane, f32 f
 }
 
 //----------------------------------------------
+//TODO: do we want to keep this here?
+#if 1
 struct InterpolatingMap_Leaf {
    f32 len;
    
@@ -942,7 +991,7 @@ void MapLookup(InterpolatingMap *map, f32 distance, void *result) {
 void interpolation_map_v2_lerp(InterpolatingMap_Leaf *a, InterpolatingMap_Leaf *b, f32 t, void *result) {
    *((v2 *)result) = lerp(a->data_v2, t, b->data_v2);
 }
- 
+#endif
 //----------------------------------------------
 
 string exe_directory = {};
@@ -980,7 +1029,9 @@ u32 arena_blocks_allocated = 0;
          return result;
       }
 
-      MemoryArena PlatformAllocArena(u64 initial_size) {
+      //TODO: named arena to make memory debugging better
+      //remember to copy the name into the arena data!!!
+      MemoryArena PlatformAllocArena(u64 initial_size/*, string name*/) {
          OutputDebugStringA("Allocating Arena\n");
          arenas_allocated++;
          
@@ -993,7 +1044,13 @@ u32 arena_blocks_allocated = 0;
          return result;
       }
 
-      buffer ReadEntireFile(const char* path, bool in_exe_directory = false) {
+      // MemoryArena PlatformAllocArena(u64 initial_size, char *name) {
+      //    return PlatformAllocArena(initial_size, Literal(name));
+      // }
+
+      //TODO: ReadFileRange()
+
+      buffer ReadEntireFile(const char* path, bool in_exe_directory = false, MemoryArena *arena = &__temp_arena) {
          char full_path[MAX_PATH + 1];
          sprintf(full_path, "%.*s%s", exe_directory.length, exe_directory.text, path);
 
@@ -1004,7 +1061,7 @@ u32 arena_blocks_allocated = 0;
          if(file_handle != INVALID_HANDLE_VALUE) {
             DWORD number_of_bytes_read;
             result.size = GetFileSize(file_handle, NULL);
-            result.data = (u8 *) VirtualAlloc(0, result.size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+            result.data = (u8 *) PushSize(arena, result.size);
             ReadFile(file_handle, result.data, result.size, &number_of_bytes_read, NULL);
             CloseHandle(file_handle);
          } else {
@@ -1017,12 +1074,6 @@ u32 arena_blocks_allocated = 0;
 
       buffer ReadEntireFile(string path, bool in_exe_directory = false) {
          return ReadEntireFile(ToCString(path), in_exe_directory);
-      }
-
-      void FreeEntireFile(buffer *file) {
-         VirtualFree(file->data, 0, MEM_RELEASE);
-         file->data = 0;
-         file->size = 0;
       }
 
       void WriteEntireFile(const char* path, buffer file) {
@@ -1039,6 +1090,22 @@ u32 arena_blocks_allocated = 0;
       void WriteEntireFile(string path, buffer file) {
          return WriteEntireFile(ToCString(path), file);
       }
+
+      //NOTE: this creates a file only if the file didnt already exist
+      //      won't totally overwrite existing files like WriteEntireFile
+      void WriteFileRange(const char* path, buffer file, u64 offset) {
+         HANDLE file_handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+                                          FILE_ATTRIBUTE_NORMAL, NULL);
+                                          
+         if(file_handle != INVALID_HANDLE_VALUE) {
+            //TODO: write at offset
+            // DWORD number_of_bytes_written;
+            // WriteFile(file_handle, file.data, file.offset, &number_of_bytes_written, NULL);
+            CloseHandle(file_handle);
+         }
+      }
+
+      //TODO: WriteFileAppend
 
       struct FileListLink {
          FileListLink *next;

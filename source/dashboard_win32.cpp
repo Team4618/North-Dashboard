@@ -24,14 +24,26 @@
 
 #include "lib/ui_impl_win32_opengl.cpp"
 
+SOCKET tcp_socket;
+bool was_connected = false;
+bool tcp_connected = false;
+f32 last_recv_time = 0;
+
+void SendPacket(buffer packet) {
+   s32 sent = send(tcp_socket, (char *)packet.data, packet.offset, 0);
+   // OutputDebugStringA(ToCString(Concat(Literal("Sent "), ToString(sent), Literal(" bytes\n"))));
+}
+
 #include "dashboard.cpp"
 #include "network.cpp"
 
-SOCKET tcp_socket;
-bool was_connected = false;
+void CreateSocket() {
+   tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+   u_long non_blocking = true;
+   ioctlsocket(tcp_socket, FIONBIO, &non_blocking);
+}
 
 void HandleConnectionStatus(DashboardState *state) {
-   bool tcp_connected = true;
    if(recv(tcp_socket, NULL, 0, 0) == SOCKET_ERROR) {
       s32 wsa_error = WSAGetLastError();
       if(wsa_error == WSAENOTCONN) {
@@ -41,24 +53,46 @@ void HandleConnectionStatus(DashboardState *state) {
       }
    }
    
+   if((state->curr_time - last_recv_time) > 2)
+      tcp_connected = false; 
+
    if(was_connected && !tcp_connected) {
       HandleDisconnect(state);
+      
+      closesocket(tcp_socket);
+      CreateSocket();
    }
 
    was_connected = tcp_connected;
 
    if(!tcp_connected) {
-      //TODO: check multiple possible address options
-      struct sockaddr_in server_addr = {};
-      server_addr.sin_family = AF_INET;
-      // server_addr.sin_addr.s_addr = inet_addr("10.46.18.2");
-      server_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
-      server_addr.sin_port = htons(5800);
+      string team_number_string = ToString(state->settings.team_number);
+      
+      if(state->settings.team_number == 0) {
+         struct sockaddr_in server_addr = {};
+         server_addr.sin_family = AF_INET;
+         server_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
+         server_addr.sin_port = htons(5800);
 
-      connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr));
+         if(connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr)) != 0) {
+            // OutputDebugStringA(ToCString(Concat( ToString(WSAGetLastError()), Literal("\n") )));
+         }
+      } else if(team_number_string.length == 4) {
+         //TODO: check multiple possible address options
+         struct sockaddr_in server_addr = {};
+         server_addr.sin_family = AF_INET;
+         //TODO: actually generate the ip from the team number string
+         server_addr.sin_addr.s_addr = inet_addr("10.46.18.2"); 
+         server_addr.sin_port = htons(5800);
+
+         if(connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr)) != 0) {
+            // OutputDebugStringA(ToCString(Concat( ToString(WSAGetLastError()), Literal("\n") )));
+         }
+      }
+      
+      //TODO: support non 4 digit team numbers
    } else {
-      //TODO: send to maintain connection
-
+      //NOTE: send to maintain connection
       PacketHeader heartbeat = {0, PacketType::Heartbeat};
       send(tcp_socket, (char *) &heartbeat, sizeof(heartbeat), 0);
    }
@@ -100,12 +134,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       
    WSADATA winsock_data = {};
    WSAStartup(MAKEWORD(2, 2), &winsock_data);
-
-   tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-   {
-      u_long non_blocking = true;
-      ioctlsocket(tcp_socket, FIONBIO, &non_blocking);
-   }
+   CreateSocket();
 
    //NOTE: test code, writes out a bunch of test files
    WriteTestFiles();
@@ -141,12 +170,15 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
                }
             } else {
                //TODO: what if the packet isnt fully sent yet or something
-               OutputDebugStringA(ToCString(Concat(Literal("Recieved Packet, Size = "), ToString(header.size), Literal("\n") )));
+               // OutputDebugStringA(ToCString(Concat(Literal("Recieved Packet, Size = "), ToString(header.size), Literal("\n") )));
 
                buffer packet = PushTempBuffer(header.size);
                recv(tcp_socket, (char *) packet.data, packet.size, 0);
 
                HandlePacket(&state, (PacketType::type) header.type, packet);
+               
+               tcp_connected = true;
+               last_recv_time = state.curr_time;
             }
          }
       }

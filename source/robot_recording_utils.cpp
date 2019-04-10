@@ -32,6 +32,8 @@ struct PathRecording {
 
 struct LoadedRecordingGroup {
    string name;
+   bool collapsed;
+   MultiLineGraphData graph;
 
    u32 diagnostic_count;
    DiagnosticsRecording *diagnostics;
@@ -68,6 +70,10 @@ struct LoadedRobotRecording {
 void LoadRecordingGroup(MemoryArena *arena, buffer *file, LoadedRecordingGroup *group) {
    RobotRecording_Group *header = ConsumeStruct(file, RobotRecording_Group);
    group->name = PushCopy(arena, ConsumeString(file, header->name_length));
+   group->collapsed = true;
+
+   //TODO: make this better
+   group->graph = NewMultiLineGraph(PlatformAllocArena( Megabyte(4) ));
 
    group->diagnostic_count = header->diagnostic_count;
    group->diagnostics = PushArray(arena, DiagnosticsRecording, header->diagnostic_count);
@@ -85,6 +91,11 @@ void LoadRecordingGroup(MemoryArena *arena, buffer *file, LoadedRecordingGroup *
       diag->unit = (North_Unit::type) diag_header->unit;
       diag->sample_count = diag_header->sample_count;
       diag->samples = ConsumeAndCopyArray(arena, file, RobotRecording_DiagnosticSample, diag->sample_count);
+
+      for(u32 i = 0; i < diag->sample_count; i++) {
+         RobotRecording_DiagnosticSample sample = diag->samples[i];
+         AddEntry(&group->graph, diag->name, sample.value, sample.time, diag->unit);
+      }
    }
 
    for(u32 i = 0; i < header->message_count; i++) {
@@ -164,8 +175,6 @@ void LoadRecording(LoadedRobotRecording *state, string file_name) {
             LoadRecordingGroup(arena, &file, state->groups + i);
          }
       }
-
-      FreeEntireFile(&file);
    }
 }
 
@@ -336,14 +345,13 @@ void AddDiagnosticSample(RecorderGroup *group,
       line = new_line;
    }
    
-   RecorderDiagnosticSampleBlock *curr_block = line->curr_sample_block;
-   if(curr_block->count >= ArraySize(curr_block->samples)) {
+   if(line->curr_sample_block->count >= ArraySize(line->curr_sample_block->samples)) {
       RecorderDiagnosticSampleBlock *new_sample_block = PushStruct(arena, RecorderDiagnosticSampleBlock);
 
       line->curr_sample_block->next = new_sample_block;
       line->curr_sample_block = new_sample_block;
    }
-   curr_block->samples[curr_block->count++] = { value, time };
+   line->curr_sample_block->samples[line->curr_sample_block->count++] = { value, time };
    line->diagnostic_sample_count++;
 }
 
@@ -435,7 +443,7 @@ void AddOrUpdateMarker(RecorderGroup *group, f32 time, string text, v2 pos) {
    data.text = text;
    data.marker.pos = pos;
    
-   AddOrUpdate(&group->state->arena, &group->messages, 
+   AddOrUpdate(&group->state->arena, &group->markers, 
                time, Messagelike_Marker, &data);
 } 
 
@@ -452,8 +460,19 @@ void AddOrUpdatePath(RecorderGroup *group, f32 time, string text,
                time, Messagelike_Path, &data);
 }
 
+void BeginUpdates(RecorderCompleteList *list) {
+   for(RecorderMessagelike *curr = list->active; 
+       curr; curr = curr->next) 
+   {
+      curr->updated = false;
+   }
+}
+
+//TODO: step through this in the debugger, not 100% sure its correct
 void CheckForComplete(RecorderCompleteList *list, f32 time) {
    RecorderMessagelike *next = list->active;
+   RecorderMessagelike *prev = NULL;
+
    while(next) {
       RecorderMessagelike *curr = next;
       next = curr->next;
@@ -464,25 +483,21 @@ void CheckForComplete(RecorderCompleteList *list, f32 time) {
          list->complete_count++;
          curr->next = list->complete;
          list->complete = curr;
+
+         if(prev != NULL)
+            prev->next = next;
+      } else {
+         prev = curr;
       }
    }
 }
 
 void CompleteAll(RecorderCompleteList *list, f32 time) {
-   RecorderMessagelike *next = list->active;
-   while(next) {
-      RecorderMessagelike *curr = next;
-      next = curr->next;
-      
-      curr->end_time = time;
-      
-      list->complete_count++;
-      curr->next = list->complete;
-      list->complete = curr;
-   }
+   BeginUpdates(list);
+   CheckForComplete(list, time);
 }
 
-void BeginRecording(RobotRecorder *state) {
+void BeginRecording(RobotRecorder *state /*, string name*/) {
    Assert(!state->recording);
    state->recording = true;
 
@@ -575,6 +590,15 @@ void WriteGroup(buffer *file, RecorderGroup *group) {
    }
 }
 
+void AppendChunk(RobotRecorder *state) {
+   buffer chunk = PushTempBuffer(Megabyte(5));
+   //TODO
+}
+
+void WriteHeader(RobotRecorder *state) {
+   //TODO
+}
+
 void EndRecording(RobotRecorder *state, string recording_name) {
    Assert(state->recording);
    state->recording = false;
@@ -631,6 +655,7 @@ void StatePacket_ParseGroup(f32 time, buffer *packet, RobotRecorder *state) {
                           diag_header->value, time); 
    }
 
+   BeginUpdates(&group->messages);
    for(u32 i = 0; i < header->message_count; i++) {
       State_Message *packet_message = ConsumeStruct(packet, State_Message);
       string text = ConsumeString(packet, packet_message->length);
@@ -639,6 +664,7 @@ void StatePacket_ParseGroup(f32 time, buffer *packet, RobotRecorder *state) {
    }
    CheckForComplete(&group->messages, time);
 
+   BeginUpdates(&group->markers);
    for(u32 i = 0; i < header->marker_count; i++) {
       State_Marker *packet_marker = ConsumeStruct(packet, State_Marker);
       string text = ConsumeString(packet, packet_marker->length);
@@ -646,6 +672,7 @@ void StatePacket_ParseGroup(f32 time, buffer *packet, RobotRecorder *state) {
    }
    CheckForComplete(&group->markers, time);
 
+   BeginUpdates(&group->paths);
    for(u32 i = 0; i < header->path_count; i++) {
       State_Path *packet_path = ConsumeStruct(packet, State_Path);
       string text = ConsumeString(packet, packet_path->length);
@@ -657,12 +684,14 @@ void StatePacket_ParseGroup(f32 time, buffer *packet, RobotRecorder *state) {
    CheckForComplete(&group->paths, time);
 }
 
-//TODO: if we run out of space in the arena, dump the current recording to a file, clear & continue recording
 void RecieveStatePacket(RobotRecorder *state, buffer packet) {
    if(!state->recording)
       return;
 
    MemoryArena *arena = &state->arena;
+
+   //TODO: if we're run out of space in the arena, 
+   //      write a chunk & reset the arena before parsing the packet 
 
    State_PacketHeader *header = ConsumeStruct(&packet, State_PacketHeader);
    f32 time = header->time;

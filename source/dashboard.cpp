@@ -18,7 +18,6 @@ string ToString(North_GameMode::type mode) {
 
 enum DashboardPage {
    DashboardPage_Home,
-   DashboardPage_ConnectedRobot,
    DashboardPage_Recordings,
    DashboardPage_Robots,
    DashboardPage_Settings
@@ -45,103 +44,174 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
 
 #include "auto_project_utils.cpp"
 
-struct ConnectedGroup;
-struct ConnectedParameter {
-   ConnectedGroup *group;
-   string name;
-   bool is_array;
+struct ConnectedMessage {
+   string text;
+   North_MessageType::type type;
+};
 
-   u32 value_count;
-   f32 *values;
+struct ConnectedMarker {
+   string text;
+   v2 pos;
+};
 
-   //NOTE: UI related stuff
-   bool collapsed;
+struct ConnectedPath {
+   string text;
+   u32 control_point_count;
+   North_HermiteControlPoint *control_points;
 };
 
 struct ConnectedGroup {
-   //TODO: we're being super infefficient with memory right now, fix eventually
-   MemoryArena param_arena;
-
+   ConnectedGroup *next_in_list;
+   ConnectedGroup *next_in_hash;
    string name;
-   MultiLineGraphData diagnostics_graph;
    
-   u32 param_count;
-   ConnectedParameter *params;
+   bool hide_graph;
+   MultiLineGraphData diagnostics_graph;
+
+   bool hide_messages;
+   u32 message_count;
+   ConnectedMessage *messages;
+
+   bool hide_markers;
+   u32 marker_count;
+   ConnectedMarker *markers;
+
+   bool hide_paths;
+   u32 path_count;
+   ConnectedPath *paths;
 };
 
-void SetParamValue(ConnectedParameter *param, f32 value, u32 index) {
-   buffer packet = PushTempBuffer(Megabyte(1));
+struct ConnectedState {
+   MemoryArena group_arena;
+   MemoryArena messagelike_arena; //NOTE: gets reset every time we recieve a state packet
 
-   {
-      ParameterOp_PacketHeader header = {};
-      header.type = ParameterOp_Type::SetValue;
-      header.group_name_length = param->group->name.length;
-      header.param_name_length = param->name.length;
+   RobotRecording_RobotStateSample pos_samples[1024];
+   u32 curr_pos_sample;
+   u32 pos_sample_count;
 
-      header.index = index;
-      header.value = value;
+   u32 group_count;
+   ConnectedGroup default_group;
+   ConnectedGroup *first_group;
+   ConnectedGroup *group_hash[64];
+
+   North_GameMode::type prev_mode;
+   North_GameMode::type mode;
+};
+
+void ResetConnectedState(ConnectedState *state) {
+   Reset(&state->group_arena);
+   Reset(&state->messagelike_arena);
+   state->curr_pos_sample = 0;
+   state->pos_sample_count = 0;
+
+   state->group_count = 0;
+   ZeroStruct(&state->default_group);
+   state->default_group.diagnostics_graph = NewMultiLineGraph(PushArena(&state->group_arena, Megabyte(4)));
+
+   state->first_group = NULL;
+   ZeroStruct(&state->group_hash);
+}
+
+ConnectedGroup *GetOrCreateGroup(ConnectedState *state, string name) {
+   if(name.length == 0)
+      return &state->default_group;
+   
+   MemoryArena *arena = &state->group_arena;
+
+   u32 hash = Hash(name) % ArraySize(state->group_hash);
+   ConnectedGroup *result = NULL;
+   for(ConnectedGroup *curr = state->group_hash[hash]; curr; curr = curr->next_in_hash) {
+      if(curr->name == name) {
+         result = curr;
+      }
    }
 
-   param->values[index] = value; 
-}
+   if(result == NULL) {
+      auto *new_group = PushStruct(arena, ConnectedGroup);
+      new_group->name = PushCopy(arena, name);
+      
+      new_group->next_in_hash = state->group_hash[hash];
+      new_group->next_in_list = state->first_group;
 
-void AddParamValue(ConnectedParameter *param, f32 value) {
-   Assert(param->is_array);
-   // MemoryArena *arena = &param->subsystem->param_arena;
-   // ConnectedParameterValue *sentinel = &param->sentinel;
+      //TODO: make this better
+      new_group->diagnostics_graph = NewMultiLineGraph(PushArena(&state->group_arena, Megabyte(4)));
 
-   // ConnectedParameterValue *new_value = PushStruct(arena, ConnectedParameterValue);
-   // new_value->value = 0;
-   // new_value->parent = param;
-   // new_value->next = sentinel;
-   // new_value->prev = sentinel->prev;
-
-   // new_value->next->prev = new_value;
-   // new_value->prev->next = new_value; 
-   // RecalculateIndicies(param);
-
-   // ParameterOp_PacketHeader header = {};
-   // header.type = ParameterOp_Type::AddValue;
-   // header.subsystem_name_length = param->subsystem->name.length;
-   // header.param_name_length = param->name.length;
-   // header.index = new_value->index;
-   // header.value = 0;
-}
-
-void RemoveParamValue(ConnectedParameter *param, u32 index) {
-   Assert(param->is_array);
-   // ConnectedParameter *parent = param->parent;
+      state->group_count++;
+      state->group_hash[hash] = new_group;
+      state->first_group = new_group;
+      result = new_group;
+   }
    
-   // param->next->prev = param->prev;
-   // param->prev->next = param->next;
-   // RecalculateIndicies(param->parent);
+   return result;
+}
 
-   // ParameterOp_PacketHeader header = {};
-   // header.type = ParameterOp_Type::RemoveValue;
-   // header.subsystem_name_length = parent->subsystem->name.length;
-   // header.param_name_length = parent->name.length;
-   // header.index = param->index;
-   // header.value = 0;
+void ParseStateGroup(f32 time, ConnectedState *state, buffer *packet) {
+   MemoryArena *arena = &state->messagelike_arena;
+
+   State_Group *header = ConsumeStruct(packet, State_Group);
+   string group_name = ConsumeString(packet, header->name_length);
+
+   ConnectedGroup *group = GetOrCreateGroup(state, group_name);
+
+   for(u32 i = 0; i < header->diagnostic_count; i++) {
+      State_Diagnostic *diag_header = ConsumeStruct(packet, State_Diagnostic);
+      string diag_name = ConsumeString(packet, diag_header->name_length);
+
+      AddEntry(&group->diagnostics_graph, diag_name, diag_header->value, time, (North_Unit::type) diag_header->unit);
+   }
+
+   group->message_count = header->message_count;
+   group->messages = PushArray(arena, ConnectedMessage, header->message_count);
+   for(u32 i = 0; i < header->message_count; i++) {
+      State_Message *packet_message = ConsumeStruct(packet, State_Message);
+      ConnectedMessage *msg = group->messages + i;
+
+      msg->text = PushCopy(arena, ConsumeString(packet, packet_message->length));
+      msg->type = (North_MessageType::type) msg->type;
+   }
+
+   group->marker_count = header->marker_count;
+   group->markers = PushArray(arena, ConnectedMarker, header->marker_count);
+   for(u32 i = 0; i < header->marker_count; i++) {
+      State_Marker *packet_marker = ConsumeStruct(packet, State_Marker);
+      ConnectedMarker *msg = group->markers + i;
+
+      msg->text = PushCopy(arena, ConsumeString(packet, packet_marker->length));
+      msg->pos = packet_marker->pos;
+   }
+
+   group->path_count = header->path_count;
+   group->paths = PushArray(arena, ConnectedPath, header->path_count);
+   for(u32 i = 0; i < header->path_count; i++) {
+      State_Path *packet_path = ConsumeStruct(packet, State_Path);
+      ConnectedPath *path = group->paths + i;
+
+      path->text = PushCopy(arena, ConsumeString(packet, packet_path->length));
+      path->control_point_count = packet_path->control_point_count;
+      path->control_points = ConsumeAndCopyArray(arena, packet, North_HermiteControlPoint, packet_path->control_point_count);
+   }
+}
+
+void ParseStatePacket(ConnectedState *state, buffer packet) {
+   MemoryArena *arena = &state->messagelike_arena;
+   Reset(arena);
+
+   State_PacketHeader *header = ConsumeStruct(&packet, State_PacketHeader);
+   state->mode = (North_GameMode::type) header->mode;
+   f32 time = header->time;
+   
+   RobotRecording_RobotStateSample sample = { header->pos, header->angle, time };
+   state->pos_samples[state->curr_pos_sample++ % ArraySize(state->pos_samples)] = sample;
+   state->pos_sample_count = Clamp(0, ArraySize(state->pos_samples), state->pos_sample_count + 1);
+
+   ParseStateGroup(time, state, &packet);
+   for(u32 i = 0; i < header->group_count; i++) {
+      ParseStateGroup(time, state, &packet);
+   }
 }
 
 struct DashboardState {
-   struct {
-      MemoryArena arena;
-      
-      ConnectedGroup default_group;
-      ConnectedGroup *groups;
-      u32 group_count;
-
-      //TODO: message, marker & path arena
-      //reset every time we get a new state packet
-
-      RobotRecording_RobotStateSample pos_samples[1024];
-      u32 curr_pos_sample;
-      u32 pos_sample_count;
-
-      North_GameMode::type prev_mode;
-      North_GameMode::type mode;
-   } connected;
+   ConnectedState connected;
 
    NorthSettings settings;
    RobotProfiles profiles;
@@ -180,7 +250,10 @@ void reloadFiles(DashboardState *state) {
 }
 
 void initDashboard(DashboardState *state) {
-   state->connected.arena = PlatformAllocArena(Megabyte(24));
+   state->connected.group_arena = PlatformAllocArena(Megabyte(10));
+   state->connected.messagelike_arena = PlatformAllocArena(Megabyte(4));
+   ResetConnectedState(&state->connected);
+
    state->settings.arena = PlatformAllocArena(Megabyte(1));
    state->recording.arena = PlatformAllocArena(Megabyte(20));
    state->auto_programs.arena = PlatformAllocArena(Megabyte(20));
@@ -240,6 +313,64 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
    DrawAutoNode(state, field, path->out_node, preview);
 }
 
+void DrawConnectedGroup(ConnectedGroup *group, element *page, ui_field_topdown *field) {
+   UI_SCOPE(page, group);
+
+   button_style hide_button = ButtonStyle(
+      dark_grey, light_grey, BLACK,
+      light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
+      off_white, light_grey,
+      20, V2(0, 0), V2(0, 0));
+
+   bool has_graph_data = !IsEmpty(&group->diagnostics_graph);
+   element *top_row = RowPanel(page, Size(Size(page).x, 20));
+   Label(top_row, (group->name.length == 0) ? Literal("Default Group") : group->name, 20, BLACK);
+   if(Button(top_row, group->hide_graph ? "  Gra+  " : "  Gra-  ", hide_button.IsEnabled(has_graph_data)).clicked) {
+      group->hide_graph = !group->hide_graph;
+   }
+   if(Button(top_row, group->hide_messages ? "  Msg+  " : "  Msg-  ", hide_button).clicked) {
+      group->hide_messages = !group->hide_messages;
+   }
+   if(Button(top_row, group->hide_markers ? "  Mrk+  " : "  Mrk-  ", hide_button).clicked) {
+      group->hide_markers = !group->hide_markers;
+   }
+   if(Button(top_row, group->hide_paths ? "  Pth+  " : "  Pth-  ", hide_button).clicked) {
+      group->hide_paths = !group->hide_paths;
+   }
+
+   if(!group->hide_graph && has_graph_data) {
+      MultiLineGraph(page, &group->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
+   }
+
+   if(!group->hide_messages) {
+      for(u32 i = 0; i < group->message_count; i++) {
+         ConnectedMessage *msg = group->messages + i;
+         Label(page, msg->text, 20, BLACK);
+      }
+   }
+
+   if(!group->hide_markers) {
+      for(u32 i = 0; i < group->marker_count; i++) {
+         ConnectedMarker *msg = group->markers + i;
+         UI_SCOPE(page, msg);
+         
+         v2 p = GetPoint(field, msg->pos);
+         element *marker_panel = Panel(field->e, RectCenterSize(p, V2(5, 5)), 
+                                       Captures(INTERACTION_HOT));
+         Background(marker_panel, GREEN);
+
+         if(IsHot(marker_panel)) {
+            Outline(marker_panel, BLACK);
+            //TODO: hover to see the marker text
+         }
+      }
+   }
+
+   if(!group->hide_paths) {
+
+   }
+}
+
 void DrawHome(element *full_page, DashboardState *state) {
    StackLayout(full_page);
    element *page = VerticalList(full_page);
@@ -279,12 +410,14 @@ void DrawHome(element *full_page, DashboardState *state) {
             //TODO: send starting pos to robot
          }   
       }
-
-      if(state->connected.pos_sample_count > 0) {
-         //TODO: draw live field tracking samples
+      
+      if(profile->state == RobotProfileState::Connected) {
+         ConnectedState *conn_state = &state->connected;
+         DrawConnectedGroup(&conn_state->default_group, page, &field);
+         for(ConnectedGroup *curr_group = conn_state->first_group; curr_group; curr_group = curr_group->next_in_list) {
+            DrawConnectedGroup(curr_group, page, &field);
+         }
       }
-
-      //TODO: draw current auto path
       
       if(starting_pos_selected) {
          bool drawing_auto_preview = false;
@@ -332,9 +465,66 @@ void DrawHome(element *full_page, DashboardState *state) {
    }
 }
 
-void DrawConnectedRobot(element *page, DashboardState *state) {
-   // Label(page, subsystem->name, 50, BLACK);
-   // MultiLineGraph(page, &subsystem->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
+void DrawRecordingGroup(element *page, LoadedRobotRecording *recording, LoadedRecordingGroup *group,
+                        bool field_loaded, ui_field_topdown *field)
+{
+   UI_SCOPE(page, group);
+   button_style hide_button = ButtonStyle(
+      dark_grey, light_grey, BLACK,
+      light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
+      off_white, light_grey,
+      20, V2(0, 0), V2(0, 0));
+
+   element *top_row = RowPanel(page, Size(Size(page).x, 20));
+   Label(top_row, (group->name.length == 0) ? Literal("Default Group") : group->name, 20, BLACK);
+   if(Button(top_row, group->collapsed ? "  +  " : "  -  ", hide_button).clicked) {
+      group->collapsed = !group->collapsed;
+   }
+
+   if(!group->collapsed) {
+      if(group->diagnostic_count != 0) {
+         element *graph = ImmutableMultiLineGraph(page, &group->graph, V2(Size(page->bounds).x - 30, 400), V2(5, 5));
+         f32 x = GetXFromTime(&group->graph, graph->bounds, recording->curr_time);
+         Line(graph, BLACK, 2, V2(x, graph->bounds.min.y), V2(x, graph->bounds.max.y));
+      }
+      
+      //TODO: messagelike timeline
+      // f32 start_time = recording->min_time;
+      // f32 total_time = recording->max_time - recording->min_time;
+
+      for(u32 i = 0; i < group->message_count; i++) {
+         MessageRecording *msg = group->messages + i;
+         // f32 min_x = ((msg->begin_time - start_time) / total_time) * Size(page->bounds).x;
+         // f32 max_x = ((msg->end_time - start_time) / total_time) * Size(page->bounds).x;
+         
+         // element *msg_panel = Panel(page, Size(max_x - min_x, 40).Padding(min_x, 0));
+         // Background(msg_panel, BLUE);
+         // Text(msg_panel, msg->text, msg_panel->bounds.min, 20, BLACK);
+
+         if((msg->begin_time <= recording->curr_time) && (recording->curr_time <= msg->end_time)) {
+            Label(page, msg->text, 20, BLACK);
+         }
+      }
+   }
+
+   for(u32 i = 0; i < group->marker_count; i++) {
+      MarkerRecording *msg = group->markers + i;
+      UI_SCOPE(page, msg);
+      
+      if((msg->begin_time <= recording->curr_time) && (recording->curr_time <= msg->end_time)) {
+         v2 p = GetPoint(field, msg->pos);
+         element *marker_panel = Panel(field->e, RectCenterSize(p, V2(5, 5)), 
+                                       Captures(INTERACTION_HOT));
+         Background(marker_panel, GREEN);
+
+         if(IsHot(marker_panel)) {
+            Outline(marker_panel, BLACK);
+            //TODO: hover to see the marker text
+         }
+      }
+   }
+
+   //TODO: draw paths
 }
 
 void DrawRecordings(element *full_page, DashboardState *state) {
@@ -350,11 +540,6 @@ void DrawRecordings(element *full_page, DashboardState *state) {
    }
 
    if(selector_open) {
-      //TODO: readd this
-      // if(DefaultClickInteraction(recording_selector).clicked) {
-      //    state->recording.loaded = false;
-      // }
-
       for(FileListLink *file = state->ncrr_files; file; file = file->next) {
          UI_SCOPE(page->context, file);
          
@@ -365,9 +550,11 @@ void DrawRecordings(element *full_page, DashboardState *state) {
       }
    } else {
       if(state->recording.loaded) {
+         ui_field_topdown field = {};
+
          if(state->settings.field.loaded) {
-            ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
-                                                  Clamp(0, Size(page->bounds).x, 700));
+            field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
+                                 Clamp(0, Size(page->bounds).x, 700));
 
             for(s32 i = 0; i < state->recording.robot_sample_count; i++) {
                RobotRecording_RobotStateSample *sample = state->recording.robot_samples + i;
@@ -380,11 +567,12 @@ void DrawRecordings(element *full_page, DashboardState *state) {
 
          //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
          HorizontalSlider(page, &state->recording.curr_time, state->recording.min_time, state->recording.max_time,
-                        V2(Size(page->bounds).x - 40, 40), V2(20, 20));
+                        V2(Size(page->bounds).x - 60, 40), V2(20, 20));
          
-         //TODO: draw graphs
-         //TODO: draw messagelike timeline
-
+         DrawRecordingGroup(page, &state->recording, &state->recording.default_group, state->settings.field.loaded, &field);
+         for(u32 i = 0; i < state->recording.group_count; i++) {
+            DrawRecordingGroup(page, &state->recording, state->recording.groups + i, state->settings.field.loaded, &field);
+         }
       } else {   
          selector_open = true;
       }
@@ -432,9 +620,6 @@ void DrawUI(element *root, DashboardState *state) {
    Background(page_tabs, dark_grey);
    PageButton(page_tabs, "Home", DashboardPage_Home, state);
    
-   // if()
-      PageButton(page_tabs, /*robot name*/ "Shopping Cart", DashboardPage_ConnectedRobot, state);
-   
    PageButton(page_tabs, "Recordings", DashboardPage_Recordings, state);
    PageButton(page_tabs, "Robots", DashboardPage_Robots, state);
    PageButton(page_tabs, "Settings", DashboardPage_Settings, state);
@@ -442,7 +627,6 @@ void DrawUI(element *root, DashboardState *state) {
    element *page = ColumnPanel(root, RectMinMax(root->bounds.min + V2(0, status_bar_height + page_tab_height), root->bounds.max));
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
-      case DashboardPage_ConnectedRobot: DrawConnectedRobot(page, state); break;
       case DashboardPage_Recordings: DrawRecordings(page, state); break;
       case DashboardPage_Robots: DrawProfiles(page, &state->profiles, state->ncrp_files); break;
       case DashboardPage_Settings: {
@@ -451,25 +635,6 @@ void DrawUI(element *root, DashboardState *state) {
          DrawSettings(page, &state->settings, robot_size_ft, robot_size_label, state->ncff_files);
       } break;
    }
-
-   //TODO: where do we put these now?
-   // if(state->connected.subsystem_count > 0) {
-   //    element *divider1 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
-   //    Background(divider1, BLACK);
-
-   //    for(u32 i = 0; i < state->connected.subsystem_count; i++) {
-   //       ConnectedSubsystem *subsystem = state->connected.subsystems + i; 
-   //       button_style style = menu_button;
-   //       style.colour = V4(0.55, 0, 0, 0.5);
-   //       if(_Button(POINTER_UI_ID(i), menu_bar, style, subsystem->name).clicked) {
-   //          state->page = DashboardPage_Subsystem;
-   //          state->selected_subsystem = subsystem;
-   //       }
-   //    }
-
-   //    element *divider2 = Panel(menu_bar, V2(Size(menu_bar->bounds).x - 40, 5), Padding(10, 0));
-   //    Background(divider2, BLACK);
-   // }
    
    if(state->profiles.current.state == RobotProfileState::Connected) {
       string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));
@@ -483,14 +648,20 @@ void DrawUI(element *root, DashboardState *state) {
       }
    }
 
+   if(state->manual_recorder.recording) {
+      Label(status_bar, ToString(state->manual_recorder.sample_count), 20, WHITE, V2(10, 0));
+   } 
+
    //TODO: move recordings to their own thread
    if((state->connected.mode == North_GameMode::Autonomous) && 
-      (state->connected.prev_mode != North_GameMode::Autonomous)) {
+      (state->connected.prev_mode != North_GameMode::Autonomous) &&
+      !state->auto_recorder.recording) {
       BeginRecording(&state->auto_recorder);
    }
 
    if((state->connected.mode != North_GameMode::Autonomous) && 
-      (state->connected.prev_mode == North_GameMode::Autonomous)) {
+      (state->connected.prev_mode == North_GameMode::Autonomous) &&
+      state->auto_recorder.recording) {
       EndRecording(&state->auto_recorder, Literal("auto_recording"));
    }
 
