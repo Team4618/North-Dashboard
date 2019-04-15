@@ -588,12 +588,14 @@ void _PageButton(ui_id id, element *parent, char *name, DashboardPage page, Dash
    }
 }
 
+MultiLineGraphData test_graph = NewMultiLineGraph(PlatformAllocArena(Kilobyte(20)));
+
 void DrawUI(element *root, DashboardState *state) {
    //OutputDebugStringA(ToCString(Concat(Literal("fps "), ToString(root->context->fps), Literal("\n"))));
    ColumnLayout(root);
    Background(root, light_grey);
    Texture(root, logoTexture, RectCenterSize(Center(root->bounds), logoTexture.size));
-   
+
    if(root->context->debug_mode != UIDebugMode_Disabled) {
       Line(root, RED, 10, V2(40, 100), V2(500, 140), V2(650, 200));
       Rectangle(root, RectCenterSize(V2(40, 100), V2(5, 5)), BLACK);
@@ -635,6 +637,11 @@ void DrawUI(element *root, DashboardState *state) {
          DrawSettings(page, &state->settings, robot_size_ft, robot_size_label, state->ncff_files);
       } break;
    }
+
+   //NOTE: TEST CODE----------------------------
+   test_graph.arena.alloc_block = NULL;
+   AddEntry(&test_graph, Literal("test"), sinf(state->curr_time), state->curr_time, 0);
+   MultiLineGraph(page, &test_graph, V2(Size(page->bounds).x - 10, 400));
    
    if(state->profiles.current.state == RobotProfileState::Connected) {
       string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));

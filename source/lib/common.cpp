@@ -223,7 +223,7 @@ bool CanAllocate(MemoryArena *arena, u64 size) {
    for(MemoryArenaBlock *block = arena->curr_block; 
        block; block = block->next)
    {
-      if(block->size <= (size + block->used))
+      if(block->size >= (size + block->used))
          return true;
    }
 
@@ -996,6 +996,12 @@ void interpolation_map_v2_lerp(InterpolatingMap_Leaf *a, InterpolatingMap_Leaf *
 
 string exe_directory = {};
 
+// struct AllocatedMemoryArena {
+// 
+// };
+
+// AllocatedMemoryArena *mdbg_first_arena;
+
 u64 total_size_requested = 0;
 u64 total_size_allocated = 0;
 u32 arenas_allocated = 0;
@@ -1265,6 +1271,8 @@ u32 arena_blocks_allocated = 0;
 
             exe_directory.length--;
          }
+
+         //TODO: setup a console for logging when we're not running in visual studios
       }
 
       struct Timer {

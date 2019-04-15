@@ -1,3 +1,10 @@
+/**
+TODO: make the graph smoother when we reuse blocks, right now it jumps
+
+   maybe change to a circular buffer & access the entries using 1 index into the buffer,
+   and build something in the backend to keep track of the blocks and stuff
+**/
+
 struct GraphEntry {
    f32 value;
    f32 time;
@@ -23,7 +30,7 @@ struct LineGraph {
    v4 colour;
    bool hidden;
 
-   GraphEntryBlock first_block;
+   GraphEntryBlock *first_block;
    GraphEntryBlock *curr_block;
 
    u32 begin_i;
@@ -52,6 +59,8 @@ struct MultiLineGraphData {
    UnitSettings units[32];
 
    bool automatic_max_time;
+   bool time_window_enabled;
+   f32 time_window;
 
    bool dragging;
    f32 dragBeginT;
@@ -76,6 +85,8 @@ void ResetMultiLineGraph(MultiLineGraphData *data) {
       data->units[i].max_value = -F32_MAX;
    }
    data->cant_allocate_more_lines = false;
+   data->time_window_enabled = false;
+   data->time_window = 10;
 }
 
 MultiLineGraphData NewMultiLineGraph(MemoryArena arena) {
@@ -111,10 +122,10 @@ v2 GetPointFor(MultiLineGraphData *data, LineGraph *graph, rect2 bounds, GraphEn
 }
 
 f32 GetValueAt(LineGraph *graph, f32 t) {
-   GraphEntry prev_entry = graph->first_block.entries[0];
+   GraphEntry prev_entry = graph->first_block->entries[0];
    
    //TODO: optimize
-   for(GraphEntryBlock *block = &graph->first_block; block; block = block->next) {
+   for(GraphEntryBlock *block = graph->first_block; block; block = block->next) {
       bool is_begin_block = (block == graph->begin_block);
       u32 begin_i = is_begin_block ? (graph->begin_i + 1) : 0;
       
@@ -148,7 +159,7 @@ void SetRange(MultiLineGraphData *data, f32 min_time, f32 max_time) {
       bool end_set = false;
 
       //TODO: optimize
-      for(GraphEntryBlock *block = &graph->first_block; block; block = block->next) {
+      for(GraphEntryBlock *block = graph->first_block; block; block = block->next) {
          for(u32 i = 0; i < block->i; i++) {
             GraphEntry entry = block->entries[i];
             
@@ -203,35 +214,46 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
                          v2 size, v2 padding = V2(0, 0), v2 margin = V2(0, 0),
                          bool immutable = false)
 {
-   element *base = _Panel(id + GEN_UI_ID, parent, Size(size).Padding(padding).Margin(margin).Layout(ColumnLayout));
-   element *graph = _Panel(id + GEN_UI_ID, base, Size(size.x, size.y - 40).Layout(ColumnLayout).Captures(INTERACTION_CLICK));
-   element *control_row = _Panel(id + GEN_UI_ID, base, Size(size.x, 40).Padding(0, 5).Layout(RowLayout));
+   _ui_scope __scope__(parent, id);
+   element *base = Panel(parent, Size(size).Padding(padding).Margin(margin).Layout(ColumnLayout));
+   element *graph = Panel(base, Size(size.x, size.y - 40).Layout(ColumnLayout).Captures(INTERACTION_CLICK));
+   element *control_row = Panel(base, Size(size.x, 40).Padding(0, 5).Layout(RowLayout));
    
    Background(graph, V4(0.7, 0.7, 0.7, 1));
 
    button_style control_button_style = ButtonStyle(V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
-                                                   V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1), V4(0.5, 0.5, 0.5, 1),
+                                                   V4(0.5, 0.5, 0.5, 1), V4(0.4, 0.4, 0.4, 1), V4(0.25, 0.25, 0.25, 1),
                                                    BLACK, BLACK,
                                                    30, V2(0, 0), V2(5, 5));
    
    if(!immutable) {
-      if(_Button(id + GEN_UI_ID, control_row, "Clear", control_button_style).clicked) {
+      if(Button(control_row, "Clear", control_button_style).clicked) {
          ResetMultiLineGraph(data);
       }
 
-      if(_Button(id + GEN_UI_ID, control_row, "Pause", control_button_style).clicked) {
+      if(Button(control_row, "Pause", control_button_style).clicked) {
          data->automatic_max_time = false;
       }
 
-      if(_Button(id + GEN_UI_ID, control_row, "Reset Min Time", control_button_style).clicked) {
+      if(Button(control_row, "Reset Min Time", control_button_style).clicked) {
          SetRange(data, data->abs_max_time, data->abs_max_time);
          data->automatic_max_time = true;
       }
    }
 
-   if(_Button(id + GEN_UI_ID, control_row, "Full Time", control_button_style).clicked) {
+   if(Button(control_row, "Full Time", control_button_style).clicked) {
       SetRange(data, data->abs_min_time, data->abs_max_time);
       data->automatic_max_time = true;
+      data->time_window_enabled = false;
+   }
+
+   if(Button(control_row, "Time Window", control_button_style).clicked) {
+      data->time_window_enabled = !data->time_window_enabled;
+   }
+
+   if(data->time_window_enabled) {
+      TextBox(control_row, &data->time_window, 20);
+      data->time_window = Max(data->time_window, 0.01);
    }
 
    MemoryArena *frame_arena = &parent->context->frame_arena;
@@ -342,12 +364,6 @@ void SetUnit(MultiLineGraphData *data, u32 unit_id, string suffix) {
    data->units[unit_id].suffix = suffix;
 }
 
-/*
-TODO:
-   -better memory managment (allocate this an arena out of a bigger one & overwrite samples when you cant allcoate any more)
-*/
-
-//NOTE: the "name" string must exist for the entire lifetime of the graph
 void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 unit_id) {
    bool first_entry = (data->first == NULL);
 
@@ -361,7 +377,7 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
    }
 
    if(graph == NULL) {
-      if(!CanAllocate(&data->arena, sizeof(LineGraph) + name.length)) {
+      if(!CanAllocate(&data->arena, sizeof(LineGraph) + sizeof(GraphEntryBlock) + name.length)) {
          data->cant_allocate_more_lines = true;
          return;
       }
@@ -374,13 +390,14 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
       data->line_hash[i] = graph;
 
       graph->name = PushCopy(&data->arena, name);
+      graph->first_block = PushStruct(&data->arena, GraphEntryBlock);
       graph->hidden = false;
       graph->colour = V4(Random01(), Random01(), Random01(), 1);
       graph->unit_id = unit_id;
 
-      graph->curr_block = &graph->first_block;
-      graph->begin_block = &graph->first_block;
-      graph->end_block = &graph->first_block;
+      graph->curr_block = graph->first_block;
+      graph->begin_block = graph->first_block;
+      graph->end_block = graph->first_block;
 
       graph->max_value = -F32_MAX;
       graph->min_value = F32_MAX;
@@ -397,8 +414,54 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
          graph->curr_block = new_block;
          curr_block = new_block;
       } else {
-         //TODO: reuse if run out of memory
-         Assert(false);
+         GraphEntryBlock *new_block = graph->first_block;
+         new_block->i = 0;
+
+         if(graph->curr_block == new_block) {
+            Assert(new_block->next == NULL);
+            graph->curr_block = NULL;
+            graph->first_block = NULL;
+         } else {
+            graph->first_block = new_block->next;
+            new_block->next = NULL;
+         } 
+         
+         data->abs_min_time = F32_MAX;
+         data->abs_max_time = -F32_MAX;
+         bool has_data = false;
+
+         for(LineGraph *curr_graph = data->first; 
+             curr_graph; curr_graph = graph->next)
+         {
+            for(GraphEntryBlock *block = curr_graph->first_block; 
+                block; block = block->next)
+            {
+               for(u32 i = 0; i < block->i; i++) {
+                  data->abs_min_time = Min(data->abs_min_time, block->entries[i].time);
+                  data->abs_max_time = Max(data->abs_max_time, block->entries[i].time);
+                  has_data = true;
+               }
+            }
+         }
+
+         if(data->abs_min_time < data->min_time) {
+            SetRange(data, data->min_time, data->max_time);
+         } else {
+            f32 curr_time_window = data->max_time - data->min_time;
+            SetRange(data, data->abs_min_time, Clamp(data->abs_min_time, data->abs_max_time, data->abs_min_time + curr_time_window));
+         }
+         
+         if(!has_data)
+            first_entry = true;
+
+         if(graph->first_block == NULL)
+            graph->first_block = new_block;
+         
+         if(graph->curr_block != NULL)
+            graph->curr_block->next = new_block;
+
+         graph->curr_block = new_block;
+         curr_block = new_block;
       }
    }
 
@@ -434,9 +497,8 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
          unit->max_value = Max(unit->max_value, value);
       }
 
-      //TODO: moving time window
-      // if(((data->max_time - data->min_time) > data->time_window) && data->time_window_enabled) {
-      //    SetRange(data, data->max_time - data->time_window, data->max_time);
-      // }
+      if(((data->max_time - data->min_time) > data->time_window) && data->time_window_enabled) {
+         SetRange(data, data->max_time - data->time_window, data->max_time);
+      }
    }
 }
