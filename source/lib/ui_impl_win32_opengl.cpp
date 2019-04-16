@@ -13,10 +13,12 @@ TODO: RENDERER REWRITE
       ui
 */
 
-PFNGLCREATEVERTEXARRAYSPROC glCreateVertexArrays;
+//NOTE: vao (dont actually use these, but need to create one because gl needs it)
+PFNGLGENVERTEXARRAYSPROC glGenVertexArrays;
 PFNGLDELETEVERTEXARRAYSPROC glDeleteVertexArrays;
 PFNGLBINDVERTEXARRAYPROC glBindVertexArray;
 
+//NOTE: shaders
 PFNGLCREATESHADERPROC glCreateShader;
 PFNGLDELETESHADERPROC glDeleteShader;
 PFNGLSHADERSOURCEPROC glShaderSource;
@@ -33,31 +35,26 @@ PFNGLUSEPROGRAMPROC glUseProgram;
 PFNGLGETPROGRAMIVPROC glGetProgramiv;
 PFNGLGETPROGRAMINFOLOGPROC glGetProgramInfoLog;
 
-PFNGLCREATEBUFFERSPROC glCreateBuffers;
+//NOTE: buffers
+PFNGLGENBUFFERSPROC glGenBuffers; 
 PFNGLDELETEBUFFERSPROC glDeleteBuffers;
 PFNGLBINDBUFFERPROC glBindBuffer;
-PFNGLNAMEDBUFFERDATAPROC glNamedBufferData;
+PFNGLBUFFERDATAPROC glBufferData;
 
+//NOTE: uniforms
 PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
 PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv;
 PFNGLUNIFORM4FVPROC glUniform4fv;
 PFNGLUNIFORM1FPROC glUniform1f;
 
-PFNGLVERTEXARRAYVERTEXBUFFERPROC glVertexArrayVertexBuffer;
-PFNGLENABLEVERTEXARRAYATTRIBPROC glEnableVertexArrayAttrib;
-PFNGLDISABLEVERTEXARRAYATTRIBPROC glDisableVertexArrayAttrib;
-PFNGLVERTEXARRAYATTRIBBINDINGPROC glVertexArrayAttribBinding;
-PFNGLVERTEXARRAYATTRIBFORMATPROC glVertexArrayAttribFormat;
-PFNGLVERTEXARRAYELEMENTBUFFERPROC glVertexArrayElementBuffer;
+//NOTE: vertex arrays (inputs to vertex shaders) 
+PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
+PFNGLDISABLEVERTEXATTRIBARRAYPROC glDisableVertexAttribArray;
+PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer;
 
+//NOTE: textures
 PFNGLUNIFORM1IPROC glUniform1i;
-PFNGLBINDTEXTUREUNITPROC glBindTextureUnit;
-PFNGLCREATETEXTURESPROC glCreateTextures;
-PFNGLTEXTURESTORAGE2DPROC glTextureStorage2D;
-PFNGLTEXTURESUBIMAGE2DPROC glTextureSubImage2D;
-PFNGLTEXTUREPARAMETERIPROC glTextureParameteri;
-
-PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
+PFNGLACTIVETEXTUREPROC glActiveTexture;
 
 image ReadImage(char *path, bool in_exe_directory) {
    image result = {};
@@ -99,12 +96,15 @@ texture createTexture(u32 *texels, u32 width, u32 height) {
    texture result = {};
    result.size = V2(width, height);
       
-   glCreateTextures(GL_TEXTURE_2D, 1, &result.handle);
-   glTextureStorage2D(result.handle, 1, GL_RGBA8, width, height);
-   glTextureSubImage2D(result.handle, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, texels);
-   glTextureParameteri(result.handle, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-   glTextureParameteri(result.handle, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-   
+   glGenTextures(1, &result.handle);
+   glBindTexture(GL_TEXTURE_2D, result.handle);
+      // glTexStorage2D(result.handle, 1, GL_RGBA8, width, height);
+      // glTexSubImage2D(, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, texels);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texels);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+   glBindTexture(GL_TEXTURE_2D, 0);
+
    return result;
 }
 
@@ -142,15 +142,7 @@ glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
       }
       stbtt_FreeBitmap(mono, 0);
 
-      GLuint handle = 0;
-      glCreateTextures(GL_TEXTURE_2D, 1, &handle);
-      glTextureStorage2D(handle, 1, GL_RGBA8, w, h);
-      glTextureSubImage2D(handle, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-      glTextureParameteri(handle, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTextureParameteri(handle, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      
-      new_glyph->tex.size = V2(w, h);
-      new_glyph->tex.handle = handle;
+      new_glyph->tex = createTexture(rgba, w, h);
       new_glyph->size_over_line_height = V2(w, h) / line_height;
       
       s32 xadvance, left_side_bearing;
@@ -231,11 +223,9 @@ GLuint shaderProgram(GLuint vert, GLuint frag) {
 void opengl_debug_callback(GLenum source, GLenum type, GLuint id, GLenum severity,
                            GLsizei length, const GLchar* message, const void* userParam)
 {
-   /*
    OutputDebugStringA("OGL Debug: ");
    OutputDebugStringA(message);
    OutputDebugStringA("\n");
-   */
 }
 
 const GLuint position_slot = 0;
@@ -245,7 +235,6 @@ const GLuint normal_slot = 3;
 
 struct openglContext {
    HDC dc;
-   GLuint vao;
    
    struct {
       GLuint handle;
@@ -347,9 +336,13 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    string gl_version_string = Literal((char *) glGetString(GL_VERSION));
    u32 major_version = gl_version_string.text[0] - '0';
    u32 minor_version = gl_version_string.text[2] - '0';   
-   bool version_ok = (major_version >= 4) && (minor_version >= 5);
+   bool version_ok = (major_version >= 3) && (minor_version >= 2);
    if(!version_ok) {
-      MessageBox(NULL, "Version < 4.5", "OpenGL Version Error", MB_OK);
+      string error_message = Concat( gl_version_string, Literal(" < 3.2\n"), 
+                                     Literal((char *) glGetString(GL_VENDOR)), Literal("\n"),
+                                     Literal((char *) glGetString(GL_RENDERER)) );
+      MessageBox(NULL, ToCString(error_message), "OpenGL Version Error", MB_OK);
+      
       Assert(false);
    }
 
@@ -358,8 +351,8 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
 
    const int gl_attribs[] = 
    {
-      WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
-      WGL_CONTEXT_MINOR_VERSION_ARB, 5,
+      WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+      WGL_CONTEXT_MINOR_VERSION_ARB, 2,
       WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
       WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_DEBUG_BIT_ARB,
       0
@@ -372,10 +365,12 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    OutputDebugStringA((char *) glGetString(GL_VERSION));
    OutputDebugStringA("\n");
 
-   glCreateVertexArrays = (PFNGLCREATEVERTEXARRAYSPROC) wglGetProcAddress("glCreateVertexArrays");
+   //-----------------------
+   glGenVertexArrays = (PFNGLGENVERTEXARRAYSPROC) wglGetProcAddress("glGenVertexArrays");
    glDeleteVertexArrays = (PFNGLDELETEVERTEXARRAYSPROC) wglGetProcAddress("glDeleteVertexArrays");
    glBindVertexArray = (PFNGLBINDVERTEXARRAYPROC) wglGetProcAddress("glBindVertexArray");
    
+   //-----------------------
    glCreateShader = (PFNGLCREATESHADERPROC) wglGetProcAddress("glCreateShader");
    glDeleteShader = (PFNGLDELETESHADERPROC) wglGetProcAddress("glDeleteShader");
    glShaderSource = (PFNGLSHADERSOURCEPROC) wglGetProcAddress("glShaderSource");
@@ -392,35 +387,32 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    glGetProgramiv = (PFNGLGETPROGRAMIVPROC) wglGetProcAddress("glGetProgramiv");
    glGetProgramInfoLog = (PFNGLGETPROGRAMINFOLOGPROC) wglGetProcAddress("glGetProgramInfoLog");
    
-   glCreateBuffers = (PFNGLCREATEBUFFERSPROC) wglGetProcAddress("glCreateBuffers");
+   //-----------------------
+   glGenBuffers = (PFNGLGENBUFFERSPROC) wglGetProcAddress("glGenBuffers");
    glDeleteBuffers = (PFNGLDELETEBUFFERSPROC) wglGetProcAddress("glDeleteBuffers");
    glBindBuffer = (PFNGLBINDBUFFERPROC) wglGetProcAddress("glBindBuffer");
-   glNamedBufferData = (PFNGLNAMEDBUFFERDATAPROC) wglGetProcAddress("glNamedBufferData");
+   glBufferData = (PFNGLBUFFERDATAPROC) wglGetProcAddress("glBufferData");
 
+   //-----------------------
    glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC) wglGetProcAddress("glGetUniformLocation");
    glUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC) wglGetProcAddress("glUniformMatrix4fv");
    glUniform4fv = (PFNGLUNIFORM4FVPROC) wglGetProcAddress("glUniform4fv");
    glUniform1f = (PFNGLUNIFORM1FPROC) wglGetProcAddress("glUniform1f");
-
-   glVertexArrayVertexBuffer = (PFNGLVERTEXARRAYVERTEXBUFFERPROC) wglGetProcAddress("glVertexArrayVertexBuffer");
-   glEnableVertexArrayAttrib = (PFNGLENABLEVERTEXARRAYATTRIBPROC) wglGetProcAddress("glEnableVertexArrayAttrib");
-   glDisableVertexArrayAttrib = (PFNGLDISABLEVERTEXARRAYATTRIBPROC) wglGetProcAddress("glDisableVertexArrayAttrib");
-   glVertexArrayAttribBinding = (PFNGLVERTEXARRAYATTRIBBINDINGPROC) wglGetProcAddress("glVertexArrayAttribBinding");
-   glVertexArrayAttribFormat = (PFNGLVERTEXARRAYATTRIBFORMATPROC) wglGetProcAddress("glVertexArrayAttribFormat");
-   glVertexArrayElementBuffer = (PFNGLVERTEXARRAYELEMENTBUFFERPROC) wglGetProcAddress("glVertexArrayElementBuffer");
    
+   //-----------------------
+   glEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC) wglGetProcAddress("glEnableVertexAttribArray");
+   glDisableVertexAttribArray = (PFNGLDISABLEVERTEXATTRIBARRAYPROC) wglGetProcAddress("glDisableVertexAttribArray");
+   glVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC) wglGetProcAddress("glVertexAttribPointer");
+
+   //-----------------------
    glUniform1i = (PFNGLUNIFORM1IPROC) wglGetProcAddress("glUniform1i");
-   glBindTextureUnit = (PFNGLBINDTEXTUREUNITPROC) wglGetProcAddress("glBindTextureUnit");
+   glActiveTexture = (PFNGLACTIVETEXTUREPROC) wglGetProcAddress("glActiveTexture");
    
-   glCreateTextures = (PFNGLCREATETEXTURESPROC) wglGetProcAddress("glCreateTextures");
-   glTextureStorage2D = (PFNGLTEXTURESTORAGE2DPROC) wglGetProcAddress("glTextureStorage2D");
-   glTextureSubImage2D = (PFNGLTEXTURESUBIMAGE2DPROC) wglGetProcAddress("glTextureSubImage2D");
-   glTextureParameteri = (PFNGLTEXTUREPARAMETERIPROC) wglGetProcAddress("glTextureParameteri");
-
-   glDebugMessageCallback = (PFNGLDEBUGMESSAGECALLBACKPROC) wglGetProcAddress("glDebugMessageCallback");
+   //-----------------------
+   PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback = (PFNGLDEBUGMESSAGECALLBACKPROC) wglGetProcAddress("glDebugMessageCallback");
+   OutputDebugStringA((glDebugMessageCallback != NULL) ? "OpenGL Debugging Supported\n" : "OpenGL Debugging Not Supported\n");
    if(glDebugMessageCallback != NULL) {
-      //NOTE: this crashes in 32bit mode & dans laptop
-      glDebugMessageCallback((GLDEBUGPROC) opengl_debug_callback, NULL);
+      // glDebugMessageCallback((GLDEBUGPROC) opengl_debug_callback, NULL);
    }
    
    GLuint transformVert = loadShader("transform.vert", GL_VERTEX_SHADER);
@@ -446,22 +438,27 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    gl.line.width_uniform = glGetUniformLocation(gl.line.handle, "Width");
    gl.line.feather_uniform = glGetUniformLocation(gl.line.handle, "Feather");
    
-   glCreateVertexArrays(1, &gl.vao);
-   glBindVertexArray(gl.vao);
+   GLuint vao;
+   glGenVertexArrays(1, &vao);
+   glBindVertexArray(vao);
    
-   glVertexArrayAttribFormat(gl.vao, position_slot, 2, GL_FLOAT, GL_FALSE, 0);
-   glVertexArrayAttribBinding(gl.vao, position_slot, position_slot);
-   
-   glVertexArrayAttribFormat(gl.vao, uv_slot, 2, GL_FLOAT, GL_FALSE, 0);
-   glVertexArrayAttribBinding(gl.vao, uv_slot, uv_slot);
-   
-   glVertexArrayAttribFormat(gl.vao, colour_slot, 4, GL_FLOAT, GL_FALSE, 0);
-   glVertexArrayAttribBinding(gl.vao, colour_slot, colour_slot);
-   
-   glVertexArrayAttribFormat(gl.vao, normal_slot, 2, GL_FLOAT, GL_FALSE, 0);
-   glVertexArrayAttribBinding(gl.vao, normal_slot, normal_slot);
+   //---------------------------
+   glGenBuffers(ArraySize(gl.buffers), gl.buffers);
 
-   glCreateBuffers(ArraySize(gl.buffers), gl.buffers);
+   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[position_slot]);
+   glVertexAttribPointer(position_slot, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0);
+   
+   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[uv_slot]);
+   glVertexAttribPointer(uv_slot, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0);
+   
+   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[colour_slot]);
+   glVertexAttribPointer(colour_slot, 4, GL_FLOAT, GL_FALSE, 0, (void*) 0);
+
+   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[normal_slot]);
+   glVertexAttribPointer(normal_slot, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0);
+
+   glBindBuffer(GL_ARRAY_BUFFER, 0);
+   //---------------------------
 
    glEnable(GL_BLEND);
    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -490,13 +487,15 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
             glUseProgram(gl->tex.handle);
             glUniformMatrix4fv(gl->tex.matrix_uniform, 1, GL_FALSE, transform.e);
             glUniform4fv(gl->tex.colour_uniform, 1, command->drawTexture.colour.e);
-            glUniform1i(gl->tex.texture_uniform, 0);
-            glBindTextureUnit(0, command->drawTexture.tex.handle);
             
-            glEnableVertexArrayAttrib(gl->vao, position_slot);
-            glEnableVertexArrayAttrib(gl->vao, uv_slot);
-            glDisableVertexArrayAttrib(gl->vao, colour_slot);
-            glDisableVertexArrayAttrib(gl->vao, normal_slot);
+            glUniform1i(gl->tex.texture_uniform, 0);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, command->drawTexture.tex.handle);
+            
+            glEnableVertexAttribArray(position_slot);
+            glEnableVertexAttribArray(uv_slot);
+            glDisableVertexAttribArray(colour_slot);
+            glDisableVertexAttribArray(normal_slot);
             
             rect2 bounds = command->drawTexture.bounds;
             v2 verts[6] = {
@@ -513,12 +512,12 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
             for(u32 i = 0; i < 6; i++)
                uvs[i] = uvs[i] / command->drawTexture.tex.size;
 
-            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[position_slot], 0, sizeof(v2));
-            glNamedBufferData(gl->buffers[position_slot], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
-            
-            glVertexArrayVertexBuffer(gl->vao, uv_slot, gl->buffers[uv_slot], 0, sizeof(v2));
-            glNamedBufferData(gl->buffers[uv_slot], 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
-            
+            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[position_slot]);
+            glBufferData(GL_ARRAY_BUFFER, 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
+
+            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[uv_slot]);
+            glBufferData(GL_ARRAY_BUFFER, 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
+
             glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
          } break;
          
@@ -527,10 +526,10 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
             glUniformMatrix4fv(gl->col.matrix_uniform, 1, GL_FALSE, transform.e);
             glUniform4fv(gl->col.colour_uniform, 1, command->drawRectangle.colour.e);
             
-            glEnableVertexArrayAttrib(gl->vao, position_slot);
-            glDisableVertexArrayAttrib(gl->vao, uv_slot);
-            glDisableVertexArrayAttrib(gl->vao, colour_slot);
-            glDisableVertexArrayAttrib(gl->vao, normal_slot);
+            glEnableVertexAttribArray(position_slot);
+            glDisableVertexAttribArray(uv_slot);
+            glDisableVertexAttribArray(colour_slot);
+            glDisableVertexAttribArray(normal_slot);
             
             rect2 bounds = command->drawRectangle.bounds;
             v2 verts[6] = {
@@ -538,9 +537,9 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
                bounds.min, bounds.min + XOf(Size(bounds)), bounds.max
             };
             
-            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[position_slot], 0, sizeof(v2));
-            glNamedBufferData(gl->buffers[position_slot], 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
-            
+            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[position_slot]);
+            glBufferData(GL_ARRAY_BUFFER, 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
+
             glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
          } break;
          
@@ -554,10 +553,10 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
             glUniform1f(gl->line.width_uniform, command->drawLine.thickness);
             glUniform1f(gl->line.feather_uniform, 2);
             
-            glEnableVertexArrayAttrib(gl->vao, position_slot);
-            glDisableVertexArrayAttrib(gl->vao, uv_slot);
-            glDisableVertexArrayAttrib(gl->vao, colour_slot);
-            glEnableVertexArrayAttrib(gl->vao, normal_slot);
+            glEnableVertexAttribArray(position_slot);
+            glDisableVertexAttribArray(uv_slot);
+            glDisableVertexAttribArray(colour_slot);
+            glEnableVertexAttribArray(normal_slot);
             
             u32 vert_count = (command->drawLine.point_count - (command->drawLine.closed ? 0 : 1)) * 6;
             v2 *verts = PushTempArray(v2, vert_count);
@@ -629,11 +628,11 @@ void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 tr
                last_point = point;
             }
 
-            glVertexArrayVertexBuffer(gl->vao, position_slot, gl->buffers[position_slot], 0, sizeof(v2));
-            glNamedBufferData(gl->buffers[position_slot], vert_count * sizeof(v2), verts, GL_STREAM_DRAW);
-            
-            glVertexArrayVertexBuffer(gl->vao, normal_slot, gl->buffers[normal_slot], 0, sizeof(v2));
-            glNamedBufferData(gl->buffers[normal_slot], vert_count * sizeof(v2), normals, GL_STREAM_DRAW);
+            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[position_slot]);
+            glBufferData(GL_ARRAY_BUFFER, vert_count * sizeof(v2), verts, GL_STREAM_DRAW);
+
+            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[normal_slot]);
+            glBufferData(GL_ARRAY_BUFFER, vert_count * sizeof(v2), normals, GL_STREAM_DRAW);
             
             glDrawArrays(GL_TRIANGLES, 0, vert_count);
          } break;
