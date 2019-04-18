@@ -1,10 +1,3 @@
-/**
-TODO: make the graph smoother when we reuse blocks, right now it jumps
-
-   maybe change to a circular buffer & access the entries using 1 index into the buffer,
-   and build something in the backend to keep track of the blocks and stuff
-**/
-
 struct GraphEntry {
    f32 value;
    f32 time;
@@ -12,7 +5,6 @@ struct GraphEntry {
 
 struct GraphEntryBlock {
    GraphEntryBlock *next;
-   u32 i;
    GraphEntry entries[256];
 };
 
@@ -30,9 +22,14 @@ struct LineGraph {
    v4 colour;
    bool hidden;
 
-   GraphEntryBlock *first_block;
-   GraphEntryBlock *curr_block;
+   GraphEntryBlock sentinel;
 
+   GraphEntryBlock *oldest_entry_block;
+   u32 oldest_entry_i;
+   GraphEntryBlock *next_entry_block;
+   u32 next_entry_i;
+
+   //NOTE: this has to do with the current viewing range
    u32 begin_i;
    GraphEntryBlock *begin_block;
    u32 end_i;
@@ -44,6 +41,58 @@ struct LineGraph {
    //NOTE: 0 means unitless, unit_id > 0 needs to be looked up in the units table
    u32 unit_id;  
 };
+
+struct LineGraphIterator {
+   LineGraph *graph;
+   bool first_block;
+
+   GraphEntryBlock *block;
+   u32 start_i;
+   u32 end_i;
+   bool last_block;
+};
+
+void StepIterator(LineGraphIterator *iter, 
+                  GraphEntryBlock *oldest_entry_block, u32 oldest_entry_i, 
+                  GraphEntryBlock *next_entry_block, u32 next_entry_i)
+{
+   bool is_start_block = iter->first_block;
+   iter->first_block = false;
+   bool is_end_block = ((oldest_entry_i < next_entry_i) || !is_start_block) && 
+                       (iter->block == next_entry_block);
+
+   iter->start_i = is_start_block ? oldest_entry_i : 0;
+   iter->end_i = is_end_block ? next_entry_i : ArraySize(oldest_entry_block->entries);
+   iter->last_block = is_end_block;
+
+   iter->block = iter->block->next;
+}
+
+GraphEntryBlock *IterateAll(LineGraph *graph, LineGraphIterator *iterator) {
+   iterator->graph = graph;
+   iterator->first_block = true;
+   iterator->block = graph->oldest_entry_block;
+   return graph->oldest_entry_block;
+}
+
+void StepAllIterator(LineGraphIterator *iter) {
+   LineGraph *graph = iter->graph;
+   StepIterator(iter, graph->oldest_entry_block, graph->oldest_entry_i,
+                      graph->next_entry_block, graph->next_entry_i);
+}
+
+GraphEntryBlock *IterateRange(LineGraph *graph, LineGraphIterator *iterator) {
+   iterator->graph = graph;
+   iterator->first_block = true;
+   iterator->block = graph->begin_block;
+   return graph->begin_block;
+}
+
+void StepRangeIterator(LineGraphIterator *iter) {
+   LineGraph *graph = iter->graph;
+   StepIterator(iter, graph->begin_block, graph->begin_i,
+                      graph->end_block, graph->end_i);
+}
 
 struct MultiLineGraphData {
    MemoryArena arena;
@@ -121,25 +170,34 @@ v2 GetPointFor(MultiLineGraphData *data, LineGraph *graph, rect2 bounds, GraphEn
    return bounds.min + V2(Size(bounds).x * t, Size(bounds).y * (1 - v));
 }
 
-f32 GetValueAt(LineGraph *graph, f32 t) {
-   GraphEntry prev_entry = graph->first_block->entries[0];
-   
-   //TODO: optimize
-   for(GraphEntryBlock *block = graph->first_block; block; block = block->next) {
-      bool is_begin_block = (block == graph->begin_block);
-      u32 begin_i = is_begin_block ? (graph->begin_i + 1) : 0;
+struct GraphValue {
+   bool has_value;
+   f32 value;
+};
+
+GraphValue GetValueAt(LineGraph *graph, f32 t) {
+   GraphEntry prev_entry = graph->oldest_entry_block->entries[graph->oldest_entry_i];
+
+   LineGraphIterator iter = {};
+   for(GraphEntryBlock *block = IterateAll(graph, &iter); ; block = block->next) {
+      StepAllIterator(&iter);
       
-      for(u32 i = begin_i; i < block->i; i++) {
+      for(u32 i = iter.start_i; i < iter.end_i; i++) {
          GraphEntry curr_entry = block->entries[i];
          if((prev_entry.time <= t) && (t <= curr_entry.time)) {
             f32 s = (t - prev_entry.time) / (curr_entry.time - prev_entry.time);
-            return lerp(prev_entry.value, s, curr_entry.value);
+            GraphValue result = { true, lerp(prev_entry.value, s, curr_entry.value) }; 
+            return result;
          }
          prev_entry = curr_entry;
       }
+
+      if(iter.last_block)
+         break;
    }
 
-   return 0;
+   GraphValue no_value = { false, 0 };
+   return no_value;
 }
 
 void SetRange(MultiLineGraphData *data, f32 min_time, f32 max_time) {
@@ -159,8 +217,11 @@ void SetRange(MultiLineGraphData *data, f32 min_time, f32 max_time) {
       bool end_set = false;
 
       //TODO: optimize
-      for(GraphEntryBlock *block = graph->first_block; block; block = block->next) {
-         for(u32 i = 0; i < block->i; i++) {
+      LineGraphIterator iter = {};
+      for(GraphEntryBlock *block = IterateAll(graph, &iter); ; block = block->next) {
+         StepAllIterator(&iter);
+         
+         for(u32 i = iter.start_i; i < iter.end_i; i++) {
             GraphEntry entry = block->entries[i];
             
             if(entry.time < min_time) {
@@ -183,16 +244,16 @@ void SetRange(MultiLineGraphData *data, f32 min_time, f32 max_time) {
                }
             }
          }
+
+         if(iter.last_block)
+            break;
       }
 
-      for(GraphEntryBlock *block = graph->begin_block; block; block = block->next) {
-         bool is_begin_block = (block == graph->begin_block);
-         bool is_end_block = (block == graph->end_block);
-         u32 begin_i = is_begin_block ? (graph->begin_i + 1) : 0;
-         u32 end_i = is_end_block ? graph->end_i : block->i;
-         
-         for(u32 i = 0; i < (end_i - begin_i); i++) {
-            GraphEntry entry = block->entries[i + begin_i];
+      for(GraphEntryBlock *block = IterateRange(graph, &iter); ; block = block->next) {
+         StepRangeIterator(&iter);
+
+         for(u32 i = iter.start_i; i < iter.end_i; i++) {
+            GraphEntry entry = block->entries[i];
             if(graph->unit_id == 0) {
                graph->min_value = Min(graph->min_value, entry.value);
                graph->max_value = Max(graph->max_value, entry.value);
@@ -203,7 +264,7 @@ void SetRange(MultiLineGraphData *data, f32 min_time, f32 max_time) {
             }
          }
 
-         if(is_end_block)
+         if(iter.last_block)
             break;
       }
    }
@@ -269,26 +330,33 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
       if(!curr_graph->hidden) {
          //TODO: optimize
          //maybe we can upload the data points to the GPU & do all the lerping in shader
-         for(GraphEntryBlock *block = curr_graph->begin_block; block; block = block->next) {
-            bool is_begin_block = (block == curr_graph->begin_block);
-            bool is_end_block = (block == curr_graph->end_block);
-            u32 begin_i = is_begin_block ? curr_graph->begin_i : 0;
-            u32 end_i = is_end_block ? curr_graph->end_i : block->i;
+         
+         LineGraphIterator iter = {};
+         for(GraphEntryBlock *block = IterateRange(curr_graph, &iter); ; block = block->next) {
+            StepRangeIterator(&iter);
             
-            u32 point_count = end_i - begin_i;
+            u32 point_count = iter.end_i - iter.start_i;
             v2 *points = PushArray(frame_arena, v2, point_count);
 
             for(u32 i = 0; i < point_count; i++) {
-               GraphEntry curr_entry = block->entries[i + begin_i];
+               GraphEntry curr_entry = block->entries[i + iter.start_i];
                points[i] = GetPointFor(data, curr_graph, graph->bounds, curr_entry);
             }
 
             _Line(graph, curr_graph->colour, highlight ? 4 : 2, points, point_count);
-
-            if(is_end_block) {
+            
+            //NOTE: debugging stuff
+            if(graph->context->debug_mode != UIDebugMode_Disabled) {
+               f32 block_begin_x = GetPointFor(data, curr_graph, graph->bounds, block->entries[iter.start_i]).x;
+               f32 block_end_x = GetPointFor(data, curr_graph, graph->bounds, block->entries[iter.end_i - 1]).x;
+               Line(graph, curr_graph->colour, 1, V2(block_begin_x, graph->bounds.min.y), V2(block_begin_x, graph->bounds.max.y));
+               Line(graph, curr_graph->colour, 1, V2(block_end_x, graph->bounds.min.y), V2(block_end_x, graph->bounds.max.y));
+            }
+            
+            if(iter.last_block) {
                break;
             } else {
-               v2 a = GetPointFor(data, curr_graph, graph->bounds, block->entries[end_i - 1]);
+               v2 a = GetPointFor(data, curr_graph, graph->bounds, block->entries[iter.end_i - 1]);
                v2 b = GetPointFor(data, curr_graph, graph->bounds, block->next->entries[0]);
                Line(graph, curr_graph->colour, highlight ? 4 : 2, a, b);
             }
@@ -336,15 +404,44 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
    if(IsHot(graph)) {
       Label(graph, Concat(Literal("time = "), ToString(cursor_t)), 20, BLACK, V2(5, 5));
       for(LineGraph *curr_graph = data->first; curr_graph; curr_graph = curr_graph->next) {
-         string prefix = Literal(curr_graph->hidden ? "- " : "+ ");
-         f32 value = GetValueAt(curr_graph, cursor_t);
+         GraphValue value_at = GetValueAt(curr_graph, cursor_t);
          Assert(curr_graph->unit_id < ArraySize(data->units));
-         string suffix = (curr_graph->unit_id == 0) ? Literal("") : data->units[curr_graph->unit_id].suffix;
-         string text = Concat(prefix, curr_graph->name, Literal(" = "), ToString(value), suffix); 
-         Label(graph, text, 20, BLACK);
+         
+         if(value_at.has_value) {
+            string prefix = Literal(curr_graph->hidden ? "- " : "+ ");
+            string suffix = (curr_graph->unit_id == 0) ? Literal("") : data->units[curr_graph->unit_id].suffix;
+            string text = Concat(prefix, curr_graph->name, Literal(" = "), ToString(value_at.value), suffix); 
+            Label(graph, text, 20, BLACK);
 
-         GraphEntry entry = {value, cursor_t};
-         Rectangle(graph, RectCenterSize(GetPointFor(data, curr_graph, graph->bounds, entry), V2(5, 5)), BLACK);
+            GraphEntry entry = { value_at.value, cursor_t };
+            Rectangle(graph, RectCenterSize(GetPointFor(data, curr_graph, graph->bounds, entry), V2(5, 5)), BLACK);
+         }  
+      }
+
+      if(graph->context->debug_mode != UIDebugMode_Disabled) {
+         Label(graph, "Debugging", 20, BLACK, V2(5, 5));
+         for(LineGraph *curr_graph = data->first; curr_graph; curr_graph = curr_graph->next) {
+            u32 block_count = 0;
+            u32 entry_count = 0;
+
+            GraphEntryBlock *block = curr_graph->oldest_entry_block;
+            do {
+               block_count++;
+               block = block->next;
+            } while(block != curr_graph->oldest_entry_block);
+
+            LineGraphIterator iter = {};
+            for(GraphEntryBlock *block = IterateRange(curr_graph, &iter); ; block = block->next) {
+               StepRangeIterator(&iter);
+               entry_count += iter.end_i - iter.start_i;
+
+               if(iter.last_block)
+                  break;
+            }
+
+            string text = Concat(curr_graph->name, Literal(" , Blocks="), ToString(block_count), Literal(" , Entries="), ToString(entry_count));
+            Label(graph, text, 20, BLACK);
+         }
       }
    }
 
@@ -376,8 +473,9 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
       }
    }
 
+   bool graph_was_created = (graph == NULL);
    if(graph == NULL) {
-      if(!CanAllocate(&data->arena, sizeof(LineGraph) + sizeof(GraphEntryBlock) + name.length)) {
+      if(!CanAllocate(&data->arena, sizeof(LineGraph) + name.length)) {
          data->cant_allocate_more_lines = true;
          return;
       }
@@ -390,14 +488,17 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
       data->line_hash[i] = graph;
 
       graph->name = PushCopy(&data->arena, name);
-      graph->first_block = PushStruct(&data->arena, GraphEntryBlock);
       graph->hidden = false;
       graph->colour = V4(Random01(), Random01(), Random01(), 1);
       graph->unit_id = unit_id;
 
-      graph->curr_block = graph->first_block;
-      graph->begin_block = graph->first_block;
-      graph->end_block = graph->first_block;
+      graph->sentinel.next = &graph->sentinel;
+      graph->oldest_entry_block = &graph->sentinel;
+      graph->next_entry_block = &graph->sentinel;
+      
+      //---------------
+      graph->begin_block = &graph->sentinel;
+      graph->end_block = &graph->sentinel;
 
       graph->max_value = -F32_MAX;
       graph->min_value = F32_MAX;
@@ -406,82 +507,95 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
    Assert(graph->unit_id < ArraySize(data->units));
    Assert(graph->unit_id == unit_id);
    
-   GraphEntryBlock *curr_block = graph->curr_block;
-   if(curr_block->i == ArraySize(graph->curr_block->entries)) {
+   Assert((graph->next_entry_block->next == graph->oldest_entry_block) || 
+          (graph->next_entry_block == graph->oldest_entry_block));   
+   
+   //allocates new block or wraps 
+   if(graph->next_entry_i == ArraySize(graph->oldest_entry_block->entries)) {
+      //NOTE: if this fails, we didnt wrap properly
+      Assert(graph->next_entry_block->next == graph->oldest_entry_block);   
+      
       if(CanAllocate(&data->arena, sizeof(GraphEntryBlock))) {
          GraphEntryBlock *new_block = PushStruct(&data->arena, GraphEntryBlock);
-         curr_block->next = new_block;
-         graph->curr_block = new_block;
-         curr_block = new_block;
+         new_block->next = graph->oldest_entry_block;
+         graph->next_entry_block->next = new_block;
+
+         graph->next_entry_block = new_block;
+         graph->next_entry_i = 0;
       } else {
-         GraphEntryBlock *new_block = graph->first_block;
-         new_block->i = 0;
-
-         if(graph->curr_block == new_block) {
-            Assert(new_block->next == NULL);
-            graph->curr_block = NULL;
-            graph->first_block = NULL;
-         } else {
-            graph->first_block = new_block->next;
-            new_block->next = NULL;
-         } 
-         
-         data->abs_min_time = F32_MAX;
-         data->abs_max_time = -F32_MAX;
-         bool has_data = false;
-
-         for(LineGraph *curr_graph = data->first; 
-             curr_graph; curr_graph = graph->next)
-         {
-            for(GraphEntryBlock *block = curr_graph->first_block; 
-                block; block = block->next)
-            {
-               for(u32 i = 0; i < block->i; i++) {
-                  data->abs_min_time = Min(data->abs_min_time, block->entries[i].time);
-                  data->abs_max_time = Max(data->abs_max_time, block->entries[i].time);
-                  has_data = true;
-               }
-            }
-         }
-
-         if(data->abs_min_time < data->min_time) {
-            SetRange(data, data->min_time, data->max_time);
-         } else {
-            f32 curr_time_window = data->max_time - data->min_time;
-            SetRange(data, data->abs_min_time, Clamp(data->abs_min_time, data->abs_max_time, data->abs_min_time + curr_time_window));
-         }
-         
-         if(!has_data)
-            first_entry = true;
-
-         if(graph->first_block == NULL)
-            graph->first_block = new_block;
-         
-         if(graph->curr_block != NULL)
-            graph->curr_block->next = new_block;
-
-         graph->curr_block = new_block;
-         curr_block = new_block;
+         graph->next_entry_block = graph->oldest_entry_block;
+         graph->next_entry_i = 0;
       }
    }
 
+   //checks if we can overwrite the previous entry instead of adding a new one
+   GraphEntryBlock *curr_block = graph->next_entry_block;
    bool overwrite_previous_entry = false;
-   if(curr_block->i >= 2) {
-      f32 a = curr_block->entries[curr_block->i - 2].value;
-      f32 b = curr_block->entries[curr_block->i - 1].value;
+   u32 entry_count = 
+      (graph->oldest_entry_block == graph->next_entry_block) ? ((graph->next_entry_i > graph->oldest_entry_i) ? (graph->next_entry_i - graph->oldest_entry_i) : graph->next_entry_i) : graph->next_entry_i;
+   if(entry_count >= 2) {
+      f32 a = curr_block->entries[graph->next_entry_i - 2].value;
+      f32 b = curr_block->entries[graph->next_entry_i - 1].value;
       overwrite_previous_entry = (value == a) && (value == b);
    }
 
-   GraphEntry *entry = curr_block->entries + (overwrite_previous_entry ? (curr_block->i - 1) : curr_block->i++);
+   //advances/wraps the oldest_entry_i if next_entry_i is going to overwrite it
+   bool recalculate_time_and_range = false;
+   if((graph->next_entry_block == graph->oldest_entry_block) && 
+      (graph->oldest_entry_i >= graph->next_entry_i) && !graph_was_created && !overwrite_previous_entry)
+   {
+      graph->oldest_entry_i++;
+      
+      if(graph->oldest_entry_i == ArraySize(graph->oldest_entry_block->entries)) {
+         graph->oldest_entry_i = 0;
+         graph->oldest_entry_block = graph->oldest_entry_block->next; 
+      }
+
+      recalculate_time_and_range = true;
+   }
+
+   //recalculates the abs time & adjusts the range when we overwrite old entries
+   if(recalculate_time_and_range) {
+      data->abs_min_time = F32_MAX;
+      data->abs_max_time = -F32_MAX;      
+      
+      for(LineGraph *curr_graph = data->first; 
+          curr_graph; curr_graph = curr_graph->next)
+      {
+         LineGraphIterator iter = {};
+         for(GraphEntryBlock *block = IterateAll(curr_graph, &iter); ; block = block->next) {
+            StepAllIterator(&iter);
+
+            for(u32 i = iter.start_i; i < iter.end_i; i++) {
+               data->abs_min_time = Min(data->abs_min_time, block->entries[i].time);
+               data->abs_max_time = Max(data->abs_max_time, block->entries[i].time);
+            }
+
+            if(iter.last_block)
+               break;
+         }
+      }
+
+      if(data->abs_min_time < data->min_time) {
+         SetRange(data, data->min_time, data->max_time);
+      } else {
+         f32 curr_time_window = data->max_time - data->min_time;
+         SetRange(data, data->abs_min_time, Clamp(data->abs_min_time, data->abs_max_time, data->abs_min_time + curr_time_window));
+      }
+   }
+   
+   //adds the new entry
+   GraphEntry *entry = curr_block->entries + (overwrite_previous_entry ? (graph->next_entry_i - 1) : graph->next_entry_i++);
    entry->value = value;
    entry->time = time;
 
+   //updates the time and range, etc...
    data->abs_min_time = Min(data->abs_min_time, time);
    data->abs_max_time = Max(data->abs_max_time, time);
 
    if(data->automatic_max_time) {
-      graph->end_block = curr_block;
-      graph->end_i = curr_block->i;
+      graph->end_block = graph->next_entry_block;
+      graph->end_i = graph->next_entry_i;
 
       if(first_entry)
          data->min_time = time;

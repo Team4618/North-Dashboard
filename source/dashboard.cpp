@@ -640,9 +640,10 @@ void DrawUI(element *root, DashboardState *state) {
 
    //NOTE: TEST CODE----------------------------
    test_graph.arena.alloc_block = NULL;
-   AddEntry(&test_graph, Literal("test"), sinf(state->curr_time), state->curr_time, 0);
    MultiLineGraph(page, &test_graph, V2(Size(page->bounds).x - 10, 400));
-   
+   AddEntry(&test_graph, Literal("square"), (sinf(state->curr_time) > 0) ? 1 : -1, state->curr_time, 1);
+   AddEntry(&test_graph, Literal("sin"), sinf(state->curr_time), state->curr_time, 1);
+
    if(state->profiles.current.state == RobotProfileState::Connected) {
       string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));
       if(Button(page_tabs, toggle_recording_text, menu_button).clicked) {
