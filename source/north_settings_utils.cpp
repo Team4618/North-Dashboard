@@ -1,5 +1,5 @@
 struct NorthSettings {
-   MemoryArena arena;
+   MemoryArena *arena; //NOTE: owned by NorthSettings 
    
    struct {
       u32 team_number;
@@ -47,7 +47,7 @@ bool DifferentThanSaved(NorthSettings *state) {
 }
 
 void ReadSettingsFile(NorthSettings *settings) {
-   Reset(&settings->arena);
+   Reset(settings->arena);
 
    buffer settings_file = ReadEntireFile("settings.ncsf");
    if(settings_file.data != NULL) {
@@ -59,7 +59,7 @@ void ReadSettingsFile(NorthSettings *settings) {
          Settings_FileHeader *header = ConsumeStruct(&settings_file, Settings_FileHeader);
          
          settings->team_number = header->team_number;
-         settings->field_name = PushCopy(&settings->arena, ConsumeString(&settings_file, header->field_name_length));
+         settings->field_name = PushCopy(settings->arena, ConsumeString(&settings_file, header->field_name_length));
       }
    }
 
@@ -92,7 +92,7 @@ void ReadSettingsFile(NorthSettings *settings) {
    }
 
    settings->saved_data.team_number = settings->team_number;
-   settings->saved_data.field_name = PushCopy(&settings->arena, settings->field_name);
+   settings->saved_data.field_name = PushCopy(settings->arena, settings->field_name);
    settings->saved_data.field.loaded = settings->field.loaded;
    settings->saved_data.field.size = settings->field.size;
    settings->saved_data.field.flags = settings->field.flags;
@@ -333,7 +333,7 @@ void DrawSettings(element *full_page, NorthSettings *state,
          Background(field_panel, light_grey);
 
          if(Button(field_panel, file->name, menu_button).clicked) {
-            state->field_name = PushCopy(&state->arena, file->name);
+            state->field_name = PushCopy(state->arena, file->name);
             UpdateSettingsFile(state);
          }
       }
@@ -367,7 +367,7 @@ void DrawSettings(element *full_page, NorthSettings *state,
       ui_dropped_files dropped_files = GetDroppedFiles(image_drop);
       
       if(dropped_files.count > 0) {
-         image_path = PushCopy(&state->arena, dropped_files.names[0]);
+         image_path = PushCopy(state->arena, dropped_files.names[0]);
          deleteTexture(image_preview);
          image new_field_img = ReadImage(image_path);
          image_preview = createTexture(new_field_img.texels, new_field_img.width, new_field_img.height);

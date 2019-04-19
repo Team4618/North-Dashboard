@@ -115,7 +115,7 @@ void deleteTexture(texture tex) {
 
 glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
    if(font->glyphs[codepoint] == NULL) {
-      glyph_texture *new_glyph = PushStruct(&font->arena, glyph_texture);
+      glyph_texture *new_glyph = PushStruct(font->arena, glyph_texture);
       new_glyph->codepoint = codepoint;
       
       //TODO: make sure this works as expected
@@ -159,7 +159,7 @@ glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
    return font->glyphs[codepoint];
 }
 
-loaded_font loadFont(buffer ttf_file, MemoryArena arena) {
+loaded_font loadFont(buffer ttf_file, MemoryArena *arena) {
    loaded_font result = {};
    result.arena = arena;
    stbtt_InitFont(&result.fontinfo, ttf_file.data, 
@@ -756,6 +756,14 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
                   }
                } break;
 
+               case VK_F3: {
+                  if(ui->debug_mode == UIDebugMode_Disabled) {
+                     ui->debug_mode = UIDebugMode_Performance;
+                  } else {
+                     ui->debug_mode = UIDebugMode_Disabled;
+                  }
+               } break;
+
                case VK_ESCAPE:
                   input->key_esc = true;
                   break;
@@ -772,7 +780,7 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
 
          case WM_DROPFILES: {
             HDROP drop = (HDROP) msg.wParam;
-            MemoryArena *arena = &ui->filedrop_arena;
+            MemoryArena *arena = ui->filedrop_arena;
             Reset(arena);
 
             u32 file_count = DragQueryFileA(drop, 0xFFFFFFFF, NULL, 0);
@@ -827,22 +835,90 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
    return window->running;
 }
 
-void endFrame(ui_impl_win32_window *window, element *root) {
-   UIContext *context = root->context;
-   InputState *input = &context->input_state;
-   Reset(&context->filedrop_arena);
-   context->filedrop_count = 0;
-   context->filedrop_names = NULL;
-   
-   glScissor(0, 0, window->size.x, window->size.y);
-   glClearColor(1, 1, 1, 1);
-   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+//DEBUG-VIEWS------------------------------------------------
+string MemorySizeString(u64 value) {
+   string memory_units[] = {
+      Literal(" Bytes"),
+      Literal(" KB"),
+      Literal(" MB"),
+      Literal(" GB")
+   };
 
-   mat4 transform = Orthographic(0, window->size.y, 0, window->size.x, 100, -100);
-   DrawElement(root, transform, window);
-   DrawRenderCommandBuffer(context->overlay->first_command, context->overlay->cliprect, transform, window);
-   
-   element *debug_root = PushStruct(&context->frame_arena, element);
+   u32 unit_index = 0;
+
+   while(value >= 1024) {
+      value /= 1024;
+      unit_index++;
+   }
+
+   Assert(unit_index < ArraySize(memory_units));
+   return Concat(ToString((u32) value), memory_units[unit_index]);
+}
+
+struct arena_diagnostics_persistent_data {
+   bool open;
+};
+
+void DrawMemoryArenaDiagnostics(element *root, NamedMemoryArena *arena, u64 *total_size, u64 *total_used) {
+   UI_SCOPE(root, arena);
+   element *base = ColumnPanel(root, Width(Size(root).x));
+   arena_diagnostics_persistent_data *data = GetOrAllocate(base, arena_diagnostics_persistent_data);
+
+   button_style hide_button = ButtonStyle(
+      V4(53/255.0, 56/255.0, 57/255.0, 1), V4(89/255.0, 89/255.0, 89/255.0, 1), BLACK,
+      V4(89/255.0, 89/255.0, 89/255.0, 1), V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
+      V4(238/255.0, 238/255.0, 238/255.0, 1), V4(89/255.0, 89/255.0, 89/255.0, 1),
+      20, V2(0, 0), V2(0, 0));
+
+   element *top_row = RowPanel(base, Size(Size(base).x, 20));
+   if(Button(top_row, data->open ? " - " : " + ", hide_button).clicked) {
+      data->open = !data->open;
+   }
+   Label(top_row, arena->name, 20, WHITE, V2(5, 0));
+
+   u64 arena_used = 0;
+   u64 arena_size = 0;
+   u32 block_count = 0;
+
+   for(MemoryArenaBlock *block = arena->arena.first_block;
+       block; block = block->next)
+   {
+      arena_size += block->size;
+      arena_used += block->used;
+      block_count++;
+   }
+
+   *total_size += arena_size;
+   *total_used += arena_used;
+
+   Label(top_row, Concat(Literal("   "), ToString(block_count), Literal(" Blocks")), 20, WHITE, V2(5, 0));
+   Label(top_row, Concat(Literal("   "), MemorySizeString(arena_used), Literal("/"), MemorySizeString(arena_size)), 20, WHITE, V2(5, 0));
+
+   if(data->open) {
+      element *viewer = ColumnPanel(base, Width(Size(base).x - 20).Padding(10, 10));
+
+      for(MemoryArenaBlock *block = arena->arena.first_block;
+       block; block = block->next)
+      {
+         element *block_graphic = ColumnPanel(viewer, Size(180, 60));
+         Background(block_graphic, BLACK);
+         f32 filled_percent = (f32)block->used / (f32)block->size;
+         rect2 filled_in = RectMinMax(block_graphic->bounds.min, 
+                                      V2(block_graphic->bounds.max.x, block_graphic->bounds.min.y + filled_percent*Size(block_graphic).y));
+         Rectangle(block_graphic, filled_in, BLUE);
+         Outline(block_graphic, WHITE);
+         
+         Label(block_graphic, Concat(MemorySizeString(block->used), Literal("/"), MemorySizeString(block->size)), 20, WHITE, V2(5, 0));         
+      }
+
+      Panel(viewer, Size(Size(viewer).x, 10));
+   }
+
+   FinalizeLayout(base);
+}
+
+element *DrawDebugView(ui_impl_win32_window *window, UIContext *context, InputState *input) {
+   element *debug_root = PushStruct(context->frame_arena, element);
    debug_root->context = context;
    debug_root->bounds = RectMinSize(V2(0, 0), window->size);
    debug_root->cliprect = RectMinSize(V2(0, 0), window->size);
@@ -916,38 +992,55 @@ void endFrame(ui_impl_win32_window *window, element *root) {
       case UIDebugMode_Memory: {
          Label(debug_root, Concat(Literal("Time: "), ToString((f32) context->curr_time)), 20, WHITE);
          Label(debug_root, Concat(Literal("FPS: "), ToString((f32) context->fps)), 20, WHITE);
-         Label(debug_root, Concat(ToString(arena_blocks_allocated), Literal(" Arena Blocks Allocated")), 20, WHITE);
-         Label(debug_root, Concat(ToString(arenas_allocated), Literal(" Arenas Allocated")), 20, WHITE);
+         
+         element *arena_list = VerticalList(Panel(debug_root, Size(400, Size(debug_root).y - 40)));
+         u64 total_size = 0;
+         u64 total_used = 0;
 
-         string memory_units[] = {
-            Literal(" Bytes"),
-            Literal(" KB"),
-            Literal(" MB"),
-            Literal(" GB")
-         };
-
-         u64 memory_value = total_size_allocated;
-         u32 memory_unit_index = 0;
-
-         while(memory_value >= 1024) {
-            memory_value /= 1024;
-            memory_unit_index++;
+         for(NamedMemoryArena *arena = mdbg_first_arena; arena; arena = arena->next) {
+            DrawMemoryArenaDiagnostics(arena_list, arena, &total_size, &total_used);
          }
-   
-         Assert(memory_unit_index < ArraySize(memory_units));
-         Label(debug_root, Concat(ToString((u32) memory_value), memory_units[memory_unit_index], Literal(" Allocated")), 20, WHITE);
-      
-         //TODO: per arena diagnostics
+
+         Label(arena_list, Concat(Literal("Total: "), MemorySizeString(total_used), Literal("/"), MemorySizeString(total_size)), 20, WHITE, V2(5, 0));
+      } break;
+
+      case UIDebugMode_Performance: {
+         Label(debug_root, Concat(Literal("Time: "), ToString((f32) context->curr_time)), 20, WHITE);
+         Label(debug_root, Concat(Literal("FPS: "), ToString((f32) context->fps)), 20, WHITE);
+
+         //TODO: add more here
       } break;
    }
-   
+
    rect2 background_bounds = RectMinSize(V2(0, 0), V2(0, 0));
    for(element *child = debug_root->first_child; 
        child; child = child->next)
    {
       background_bounds = Union(background_bounds, child->bounds);
    }
+
    Rectangle(debug_root, background_bounds, V4(0, 0, 0, 0.75));   
+
+   return debug_root;
+}
+//DEBUG-VIEWS-DONE---------------------------------
+
+void endFrame(ui_impl_win32_window *window, element *root) {
+   UIContext *context = root->context;
+   InputState *input = &context->input_state;
+   Reset(context->filedrop_arena);
+   context->filedrop_count = 0;
+   context->filedrop_names = NULL;
+   
+   glScissor(0, 0, window->size.x, window->size.y);
+   glClearColor(1, 1, 1, 1);
+   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+   mat4 transform = Orthographic(0, window->size.y, 0, window->size.x, 100, -100);
+   DrawElement(root, transform, window);
+   DrawRenderCommandBuffer(context->overlay->first_command, context->overlay->cliprect, transform, window);
+   
+   element *debug_root = DrawDebugView(window, context, input);
    DrawElement(debug_root, transform, window);
 
    SwapBuffers(window->gl.dc);

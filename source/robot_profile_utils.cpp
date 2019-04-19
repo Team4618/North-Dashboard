@@ -40,7 +40,7 @@ namespace RobotProfileState {
 };
 
 struct RobotProfile {
-   MemoryArena arena;
+   MemoryArena *arena; //NOTE: owned by RobotProfile
 
    RobotProfileState::type state;
    string name;
@@ -90,7 +90,7 @@ RobotProfileGroup *GetOrCreateGroup(RobotProfile *profile, string name) {
    RobotProfileGroup *result = GetGroup(profile, name);
    
    if(result == NULL) {
-      MemoryArena *arena = &profile->arena;
+      MemoryArena *arena = profile->arena;
       result = PushStruct(arena, RobotProfileGroup);
       result->name = PushCopy(arena, name);
 
@@ -194,7 +194,7 @@ void UpdateProfileFile(RobotProfile *profile) {
 
 //Packet-Parsing-------------------------------------
 void RecieveWelcomePacket(RobotProfile *profile, buffer packet) {
-   MemoryArena *arena = &profile->arena;
+   MemoryArena *arena = profile->arena;
    
    Reset(arena);
    profile->state = RobotProfileState::Connected;
@@ -281,7 +281,7 @@ void RecieveParamGroup(MemoryArena *arena, RobotProfile *profile, buffer *packet
 
 void RecieveCurrentParametersPacket(RobotProfile *profile, buffer packet) {
    Assert(profile->state == RobotProfileState::Connected);
-   MemoryArena *arena = &profile->arena;
+   MemoryArena *arena = profile->arena;
    
    CurrentParameters_PacketHeader *header = ConsumeStruct(&packet, CurrentParameters_PacketHeader);
    
@@ -319,7 +319,7 @@ void ParseGroup(MemoryArena *arena, buffer *file, RobotProfile *profile) {
 }
 
 void ParseProfileFile(RobotProfile *profile, buffer file, string name) {
-   MemoryArena *arena = &profile->arena;
+   MemoryArena *arena = profile->arena;
    
    profile->state = RobotProfileState::Loaded;
    profile->first_group = NULL;

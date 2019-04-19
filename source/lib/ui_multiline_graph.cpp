@@ -317,7 +317,7 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
       data->time_window = Max(data->time_window, 0.01);
    }
 
-   MemoryArena *frame_arena = &parent->context->frame_arena;
+   MemoryArena *frame_arena = parent->context->frame_arena;
 
    for(LineGraph *curr_graph = data->first; curr_graph; curr_graph = curr_graph->next) {
       ui_button btn = _Button(POINTER_UI_ID(curr_graph), control_row, curr_graph->name, control_button_style);

@@ -49,7 +49,7 @@ struct LoadedRecordingGroup {
 };
 
 struct LoadedRobotRecording {
-   MemoryArena arena;
+   MemoryArena *arena; //NOTE: owned by LoadedRobotRecording
    bool loaded;
 
    string robot_name;
@@ -72,8 +72,8 @@ void LoadRecordingGroup(MemoryArena *arena, buffer *file, LoadedRecordingGroup *
    group->name = PushCopy(arena, ConsumeString(file, header->name_length));
    group->collapsed = true;
 
-   //TODO: make this better
-   group->graph = NewMultiLineGraph(PlatformAllocArena( Megabyte(4) ));
+   //TODO: make sure this is ok, these graphs shouldnt live longer than the recording arena
+   group->graph = NewMultiLineGraph(PushArena(arena, Megabyte(4)));
 
    group->diagnostic_count = header->diagnostic_count;
    group->diagnostics = PushArray(arena, DiagnosticsRecording, header->diagnostic_count);
@@ -131,7 +131,7 @@ void LoadRecordingGroup(MemoryArena *arena, buffer *file, LoadedRecordingGroup *
 }
 
 void LoadRecording(LoadedRobotRecording *state, string file_name) {
-   MemoryArena *arena = &state->arena;
+   MemoryArena *arena = state->arena;
    
    Reset(arena);
    buffer file = ReadEntireFile(Concat(file_name, Literal(".ncrr")));
@@ -260,7 +260,7 @@ struct RecorderGroup {
 };
 
 struct RobotRecorder {
-   MemoryArena arena;
+   MemoryArena *arena; //NOTE: owned by RobotRecorder 
    bool recording;
    f32 latest_time;
 
@@ -282,7 +282,7 @@ RecorderGroup *GetOrCreateRecorderGroup(RobotRecorder *state, string name) {
    if(name.length == 0)
       return &state->default_group;
    
-   MemoryArena *arena = &state->arena;
+   MemoryArena *arena = state->arena;
 
    u32 hash = Hash(name) % ArraySize(state->group_hash);
    RecorderGroup *result = NULL;
@@ -320,7 +320,7 @@ void AddDiagnosticSample(RecorderGroup *group,
                          string name, North_Unit::type unit,
                          f32 value, f32 time) 
 {
-   MemoryArena *arena = &group->state->arena;
+   MemoryArena *arena = group->state->arena;
    
    u32 hash = Hash(name) % ArraySize(group->diagnostic_hash);
    RecorderDiagnostic *line = NULL;
@@ -434,7 +434,7 @@ void AddOrUpdateMessage(RecorderGroup *group, f32 time, string text, North_Messa
    data.text = text;
    data.message.type = type;
    
-   AddOrUpdate(&group->state->arena, &group->messages, 
+   AddOrUpdate(group->state->arena, &group->messages, 
                time, Messagelike_Message, &data);
 } 
 
@@ -443,7 +443,7 @@ void AddOrUpdateMarker(RecorderGroup *group, f32 time, string text, v2 pos) {
    data.text = text;
    data.marker.pos = pos;
    
-   AddOrUpdate(&group->state->arena, &group->markers, 
+   AddOrUpdate(group->state->arena, &group->markers, 
                time, Messagelike_Marker, &data);
 } 
 
@@ -456,7 +456,7 @@ void AddOrUpdatePath(RecorderGroup *group, f32 time, string text,
    data.path.control_point_count = control_point_count;
    data.path.control_points = control_points;
    
-   AddOrUpdate(&group->state->arena, &group->paths, 
+   AddOrUpdate(group->state->arena, &group->paths, 
                time, Messagelike_Path, &data);
 }
 
@@ -501,7 +501,7 @@ void BeginRecording(RobotRecorder *state /*, string name*/) {
    Assert(!state->recording);
    state->recording = true;
 
-   Reset(&state->arena);
+   Reset(state->arena);
    state->first_group = NULL;
    state->group_count = 0;
 
@@ -688,7 +688,7 @@ void RecieveStatePacket(RobotRecorder *state, buffer packet) {
    if(!state->recording)
       return;
 
-   MemoryArena *arena = &state->arena;
+   MemoryArena *arena = state->arena;
 
    //TODO: if we're run out of space in the arena, 
    //      write a chunk & reset the arena before parsing the packet 

@@ -298,7 +298,9 @@ struct AutoPath {
 };
 
 void InitAutoPath(AutoPath *path) {
-   path->len_to_data.arena = PlatformAllocArena(Megabyte(2));
+   //TODO: properly do this, BIG HACK
+   MemoryArena *arena = PlatformAllocArena(Megabyte(2) + sizeof(MemoryArenaBlock), "AutoPathHACK");
+   path->len_to_data.arena = PushArena(arena, Megabyte(2));
    path->len_to_data.sample_exp = 7;
    path->len_to_data.lerp_callback = path_data_lerp;
 }
@@ -312,7 +314,7 @@ struct AutoProjectLink {
 };
 
 struct AutoProjectList {
-   MemoryArena arena;
+   MemoryArena *arena;
    AutoProjectLink *first;
 };
 
@@ -321,7 +323,7 @@ struct AutoPathSpline {
    North_HermiteControlPoint *points;
 };
 
-AutoPathSpline GetAutoPathSpline(AutoPath *path, MemoryArena *arena = &__temp_arena) {
+AutoPathSpline GetAutoPathSpline(AutoPath *path, MemoryArena *arena = __temp_arena) {
    u32 control_point_count = path->control_point_count + 2;
    North_HermiteControlPoint *control_points = PushArray(arena, North_HermiteControlPoint, control_point_count);
    control_points[0] = { path->in_node->pos, path->in_tangent };
@@ -620,11 +622,11 @@ AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
 }
 
 void ReadProjectsStartingAt(AutoProjectList *list, u32 field_flags, v2 pos, RobotProfile *bot) {
-   Reset(&list->arena);
+   Reset(list->arena);
    list->first = NULL;
 
    for(FileListLink *file = ListFilesWithExtension("*.ncap"); file; file = file->next) {
-      AutoProjectLink *auto_proj = ReadAutoProject(file->name, &list->arena);
+      AutoProjectLink *auto_proj = ReadAutoProject(file->name, list->arena);
       if(auto_proj && IsProjectCompatible(auto_proj, bot)) {
          //TODO: do reflecting and stuff in here
          bool valid = false;

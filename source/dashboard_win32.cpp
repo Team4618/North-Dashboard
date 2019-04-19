@@ -105,7 +105,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    //we load app-crucial files (eg. shaders, font) from the directory that the exe is in, 
    //we load user files (eg. settings, saves) from the working directory   
 
-   Win32CommonInit(PlatformAllocArena(Megabyte(10)));
+   Win32CommonInit(PlatformAllocArena(Megabyte(10), "Temp"));
 
    ui_impl_win32_window window = createWindow("North Dashboard");
    
@@ -124,9 +124,9 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    initTheme();
 
    UIContext ui_context = {};
-   ui_context.frame_arena = PlatformAllocArena(Megabyte(2));
-   ui_context.persistent_arena = PlatformAllocArena(Megabyte(2));
-   ui_context.filedrop_arena = PlatformAllocArena(Megabyte(2));
+   ui_context.frame_arena = PlatformAllocArena(Megabyte(2), "UI Frame");
+   ui_context.persistent_arena = PlatformAllocArena(Megabyte(2), "UI Persistent");
+   ui_context.filedrop_arena = PlatformAllocArena(Megabyte(2), "UI Filedrop");
    ui_context.font = &theme_font;
 
    DashboardState state = {};
@@ -151,7 +151,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
          OutputDebugStringA("Directory Changed\n");
       }
 
-      Reset(&__temp_arena);
+      Reset(__temp_arena);
 
       {
          bool has_packets = true;
@@ -185,7 +185,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       
       HandleConnectionStatus(&state);
 
-      Reset(&__temp_arena);
+      Reset(__temp_arena);
       
       element *root_element = beginFrame(window.size, &ui_context, dt);
       DrawUI(root_element, &state);

@@ -188,7 +188,7 @@ u8 *PushSize(MemoryArena *arena, u64 size, bool assert_on_empty = true) {
    Assert(arena->valid);
 
    MemoryArenaBlock *curr_block = arena->curr_block;
-   if(curr_block->size <= (size + curr_block->used)) {
+   if(curr_block->size < (size + curr_block->used)) {
       if(curr_block->next == NULL) {
          if(arena->alloc_block == NULL) {
             if(assert_on_empty)
@@ -356,12 +356,12 @@ void WriteString(buffer *b, string str) {
 
 #define WriteStructData(b, type, name, code) do { type name = {}; code WriteStruct(b, &name); } while(false)
 
-MemoryArena __temp_arena;
+MemoryArena *__temp_arena = NULL;
 
 struct TempArena {
    MemoryArena arena;
 
-   TempArena(MemoryArena *_arena = &__temp_arena) {
+   TempArena(MemoryArena *_arena = __temp_arena) {
       arena = BeginTemp(_arena);
    } 
 
@@ -370,14 +370,14 @@ struct TempArena {
    }
 };
 
-#define PushTempSize(size) PushSize(&__temp_arena, (size))
-#define PushTempStruct(struct) (struct *) PushSize(&__temp_arena, sizeof(struct))
-#define PushTempArray(struct, length) (struct *) PushSize(&__temp_arena, (length) * sizeof(struct))
-#define PushTempCopy(string) PushCopy(&__temp_arena, (string))
-#define PushTempBuffer(size) PushBuffer(&__temp_arena, (size))
+#define PushTempSize(size) PushSize(__temp_arena, (size))
+#define PushTempStruct(struct) (struct *) PushSize(__temp_arena, sizeof(struct))
+#define PushTempArray(struct, length) (struct *) PushSize(__temp_arena, (length) * sizeof(struct))
+#define PushTempCopy(string) PushCopy(__temp_arena, (string))
+#define PushTempBuffer(size) PushBuffer(__temp_arena, (size))
 
 MemoryArenaBlock *PushTempBlock(u64 size) {
-   MemoryArenaBlock *result = (MemoryArenaBlock *) PushSize(&__temp_arena, sizeof(MemoryArenaBlock) + size);
+   MemoryArenaBlock *result = (MemoryArenaBlock *) PushSize(__temp_arena, sizeof(MemoryArenaBlock) + size);
    result->size = size;
    result->used = 0;
    result->next = NULL;
@@ -470,7 +470,7 @@ string ToString(s32 value) {
 char *ToCString(string str) {
    char null_terminated[256] = {};
    sprintf(null_terminated, "%.*s", Min(str.length, 255), str.text);
-   return (char *) PushCopy(&__temp_arena, null_terminated, ArraySize(null_terminated));
+   return (char *) PushCopy(__temp_arena, null_terminated, ArraySize(null_terminated));
 }
 
 #include "stdlib.h"
@@ -996,16 +996,15 @@ void interpolation_map_v2_lerp(InterpolatingMap_Leaf *a, InterpolatingMap_Leaf *
 
 string exe_directory = {};
 
-// struct AllocatedMemoryArena {
-// 
-// };
+struct NamedMemoryArena {
+   //NOTE: NamedMemoryArena, the name string & the arena are all allocated together
+   NamedMemoryArena *next;
 
-// AllocatedMemoryArena *mdbg_first_arena;
+   string name;
+   MemoryArena arena;
+};
 
-u64 total_size_requested = 0;
-u64 total_size_allocated = 0;
-u32 arenas_allocated = 0;
-u32 arena_blocks_allocated = 0;
+NamedMemoryArena *mdbg_first_arena = NULL;
 
 //------------------PLATFORM-SPECIFIC-STUFF---------------------
 #ifdef COMMON_PLATFORM
@@ -1020,13 +1019,7 @@ u32 arena_blocks_allocated = 0;
       // #define READ_BARRIER MemoryBarrier()
       // #define WRITE_BARRIER MemoryBarrier()
 
-      //TODO: take a look at the weird memory usage
       MemoryArenaBlock *PlatformAllocArenaBlock(u64 size) {
-         OutputDebugStringA("Allocating Arena Block\n");
-         total_size_requested += size;
-         total_size_allocated += (sizeof(MemoryArenaBlock) + size);
-         arena_blocks_allocated++;
-
          MemoryArenaBlock *result = (MemoryArenaBlock *) VirtualAlloc(0, sizeof(MemoryArenaBlock) + size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
          result->size = size;
          result->used = 0;
@@ -1035,28 +1028,47 @@ u32 arena_blocks_allocated = 0;
          return result;
       }
 
-      //TODO: named arena to make memory debugging better
-      //remember to copy the name into the arena data!!!
-      MemoryArena PlatformAllocArena(u64 initial_size/*, string name*/) {
-         OutputDebugStringA("Allocating Arena\n");
-         arenas_allocated++;
+      MemoryArena *PlatformAllocArena(u64 initial_size, string name) {
+         //NOTE: big joint allocation here
+         //TODO: make joint allocations easier??
+         u8 *memory = (u8 *) VirtualAlloc(0, 
+            sizeof(NamedMemoryArena) + name.length + sizeof(MemoryArenaBlock) + initial_size, 
+            MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
          
-         MemoryArena result = {};
-         result.first_block = PlatformAllocArenaBlock(initial_size);
-         result.curr_block = result.first_block;
-         result.initial_size = initial_size;
-         result.valid = true;
-         result.alloc_block = PlatformAllocArenaBlock;
-         return result;
+         NamedMemoryArena *named_arena = (NamedMemoryArena *) memory;
+         u8 *string_text = (u8 *) (memory + sizeof(NamedMemoryArena));
+         MemoryArenaBlock *first_block = (MemoryArenaBlock *) (memory + sizeof(NamedMemoryArena) + name.length);
+         u8 *block_memory = (u8 *) (memory + sizeof(NamedMemoryArena) + name.length + sizeof(MemoryArenaBlock));
+
+         //NOTE: initializing everything
+         first_block->size = initial_size;
+         first_block->used = 0;
+         first_block->next = NULL;
+         first_block->memory = block_memory;
+         
+         named_arena->name = String((char *) string_text, name.length);
+         Copy(name.text, name.length, named_arena->name.text); 
+
+         ZeroStruct(&named_arena->arena);
+         named_arena->arena.first_block = first_block;
+         named_arena->arena.curr_block = first_block;
+         named_arena->arena.initial_size = initial_size;
+         named_arena->arena.valid = true;
+         named_arena->arena.alloc_block = PlatformAllocArenaBlock;
+
+         named_arena->next = mdbg_first_arena;
+         mdbg_first_arena = named_arena;
+
+         return &named_arena->arena;
       }
 
-      // MemoryArena PlatformAllocArena(u64 initial_size, char *name) {
-      //    return PlatformAllocArena(initial_size, Literal(name));
-      // }
+      MemoryArena *PlatformAllocArena(u64 initial_size, char *name) {
+         return PlatformAllocArena(initial_size, Literal(name));
+      }
 
       //TODO: ReadFileRange()
 
-      buffer ReadEntireFile(const char* path, bool in_exe_directory = false, MemoryArena *arena = &__temp_arena) {
+      buffer ReadEntireFile(const char* path, bool in_exe_directory = false, MemoryArena *arena = __temp_arena) {
          char full_path[MAX_PATH + 1];
          sprintf(full_path, "%.*s%s", exe_directory.length, exe_directory.text, path);
 
@@ -1119,7 +1131,7 @@ u32 arena_blocks_allocated = 0;
          string full_name;
       };
 
-      FileListLink *ListFilesWithExtension(char *wildcard_extension, MemoryArena *arena = &__temp_arena) {
+      FileListLink *ListFilesWithExtension(char *wildcard_extension, MemoryArena *arena = __temp_arena) {
          WIN32_FIND_DATAA file = {};
          HANDLE handle = FindFirstFileA(wildcard_extension, &file);
          FileListLink *result = NULL;
@@ -1184,25 +1196,26 @@ u32 arena_blocks_allocated = 0;
       };
       
       struct FileWatcher {
-         MemoryArena arena; //NOTE: this needs its own memory because it has to persist
+         //NOTE: this needs its own memory because it has to persist
+         MemoryArena *arena; //NOTE: FileWatcher ownes this
          string wildcard_extension;
 
          FileWatcherLink *first_in_list;
          FileWatcherLink *hash[64];
       };
 
-      void InitFileWatcher(FileWatcher *watcher, MemoryArena arena, string wildcard_extension) {
+      void InitFileWatcher(FileWatcher *watcher, MemoryArena *arena, string wildcard_extension) {
          watcher->arena = arena;
-         watcher->wildcard_extension = PushCopy(&watcher->arena, wildcard_extension);
+         watcher->wildcard_extension = PushCopy(watcher->arena, wildcard_extension);
       }
       
-      void InitFileWatcher(FileWatcher *watcher, MemoryArena arena, char *wildcard_extension) {
+      void InitFileWatcher(FileWatcher *watcher, MemoryArena *arena, char *wildcard_extension) {
          InitFileWatcher(watcher, arena, Literal(wildcard_extension));
       }
 
       //NOTE: updates file watcher, returns true if file timestamps have changed
       bool CheckFiles(FileWatcher *watcher) {
-         MemoryArena *arena = &watcher->arena;
+         MemoryArena *arena = watcher->arena;
 
          for(FileWatcherLink *curr = watcher->first_in_list;
              curr; curr = curr->next_in_list)
@@ -1258,7 +1271,7 @@ u32 arena_blocks_allocated = 0;
       
       //NOTE: this is pretty jank-tastic but itll get cleaned up in future
       char exepath[MAX_PATH + 1];
-      void Win32CommonInit(MemoryArena temp_arena) {
+      void Win32CommonInit(MemoryArena *temp_arena) {
          __temp_arena = temp_arena;
 
          if(0 == GetModuleFileNameA(0, exepath, MAX_PATH + 1))

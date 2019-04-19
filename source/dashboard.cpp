@@ -82,8 +82,9 @@ struct ConnectedGroup {
 };
 
 struct ConnectedState {
-   MemoryArena group_arena;
-   MemoryArena messagelike_arena; //NOTE: gets reset every time we recieve a state packet
+   //NOTE: both owned by ConnectedState
+   MemoryArena *group_arena;
+   MemoryArena *messagelike_arena; //NOTE: gets reset every time we recieve a state packet
 
    RobotRecording_RobotStateSample pos_samples[1024];
    u32 curr_pos_sample;
@@ -99,14 +100,14 @@ struct ConnectedState {
 };
 
 void ResetConnectedState(ConnectedState *state) {
-   Reset(&state->group_arena);
-   Reset(&state->messagelike_arena);
+   Reset(state->group_arena);
+   Reset(state->messagelike_arena);
    state->curr_pos_sample = 0;
    state->pos_sample_count = 0;
 
    state->group_count = 0;
    ZeroStruct(&state->default_group);
-   state->default_group.diagnostics_graph = NewMultiLineGraph(PushArena(&state->group_arena, Megabyte(4)));
+   state->default_group.diagnostics_graph = NewMultiLineGraph(PushArena(state->group_arena, Megabyte(4)));
 
    state->first_group = NULL;
    ZeroStruct(&state->group_hash);
@@ -116,7 +117,7 @@ ConnectedGroup *GetOrCreateGroup(ConnectedState *state, string name) {
    if(name.length == 0)
       return &state->default_group;
    
-   MemoryArena *arena = &state->group_arena;
+   MemoryArena *arena = state->group_arena;
 
    u32 hash = Hash(name) % ArraySize(state->group_hash);
    ConnectedGroup *result = NULL;
@@ -134,7 +135,7 @@ ConnectedGroup *GetOrCreateGroup(ConnectedState *state, string name) {
       new_group->next_in_list = state->first_group;
 
       //TODO: make this better
-      new_group->diagnostics_graph = NewMultiLineGraph(PushArena(&state->group_arena, Megabyte(4)));
+      new_group->diagnostics_graph = NewMultiLineGraph(PushArena(state->group_arena, Megabyte(4)));
 
       state->group_count++;
       state->group_hash[hash] = new_group;
@@ -146,7 +147,7 @@ ConnectedGroup *GetOrCreateGroup(ConnectedState *state, string name) {
 }
 
 void ParseStateGroup(f32 time, ConnectedState *state, buffer *packet) {
-   MemoryArena *arena = &state->messagelike_arena;
+   MemoryArena *arena = state->messagelike_arena;
 
    State_Group *header = ConsumeStruct(packet, State_Group);
    string group_name = ConsumeString(packet, header->name_length);
@@ -193,7 +194,7 @@ void ParseStateGroup(f32 time, ConnectedState *state, buffer *packet) {
 }
 
 void ParseStatePacket(ConnectedState *state, buffer packet) {
-   MemoryArena *arena = &state->messagelike_arena;
+   MemoryArena *arena = state->messagelike_arena;
    Reset(arena);
 
    State_PacketHeader *header = ConsumeStruct(&packet, State_PacketHeader);
@@ -231,7 +232,7 @@ struct DashboardState {
    //--------------------------------------------------------
 
    bool directory_changed;
-   MemoryArena file_lists_arena;
+   MemoryArena *file_lists_arena;
    FileListLink *ncff_files; //Field 
    FileListLink *ncrr_files; //Recording
    FileListLink *ncrp_files; //Robot Profile
@@ -241,30 +242,30 @@ struct DashboardState {
 };
 
 void reloadFiles(DashboardState *state) {
-   Reset(&state->file_lists_arena);
-   state->ncff_files = ListFilesWithExtension("*.ncff", &state->file_lists_arena);
-   state->ncrr_files = ListFilesWithExtension("*.ncrr", &state->file_lists_arena);
-   state->ncrp_files = ListFilesWithExtension("*.ncrp", &state->file_lists_arena);
+   Reset(state->file_lists_arena);
+   state->ncff_files = ListFilesWithExtension("*.ncff", state->file_lists_arena);
+   state->ncrr_files = ListFilesWithExtension("*.ncrr", state->file_lists_arena);
+   state->ncrp_files = ListFilesWithExtension("*.ncrp", state->file_lists_arena);
 
    ReadSettingsFile(&state->settings);
 }
 
 void initDashboard(DashboardState *state) {
-   state->connected.group_arena = PlatformAllocArena(Megabyte(10));
-   state->connected.messagelike_arena = PlatformAllocArena(Megabyte(4));
+   state->connected.group_arena = PlatformAllocArena(Megabyte(10), "Connected Group");
+   state->connected.messagelike_arena = PlatformAllocArena(Megabyte(4), "Connected Messagelike");
    ResetConnectedState(&state->connected);
 
-   state->settings.arena = PlatformAllocArena(Megabyte(1));
-   state->recording.arena = PlatformAllocArena(Megabyte(20));
-   state->auto_programs.arena = PlatformAllocArena(Megabyte(20));
-   state->file_lists_arena = PlatformAllocArena(Megabyte(10));
-   state->auto_recorder.arena = PlatformAllocArena(Megabyte(30));
-   state->manual_recorder.arena = PlatformAllocArena(Megabyte(30));
-   state->profiles.current.arena = PlatformAllocArena(Megabyte(10));
-   state->profiles.loaded.arena = PlatformAllocArena(Megabyte(10));
+   state->settings.arena = PlatformAllocArena(Megabyte(1), "Settings");
+   state->recording.arena = PlatformAllocArena(Megabyte(20), "Loaded Recording");
+   state->auto_programs.arena = PlatformAllocArena(Megabyte(20), "Auto Programs");
+   state->file_lists_arena = PlatformAllocArena(Megabyte(10), "File Lists");
+   state->auto_recorder.arena = PlatformAllocArena(Megabyte(30), "Auto Recorder");
+   state->manual_recorder.arena = PlatformAllocArena(Megabyte(30), "Manual Recorder");
+   state->profiles.current.arena = PlatformAllocArena(Megabyte(10), "Current Profile");
+   state->profiles.loaded.arena = PlatformAllocArena(Megabyte(10), "Loaded Profile");
    state->page = DashboardPage_Home;
    
-   InitFileWatcher(&state->file_watcher, PlatformAllocArena(Kilobyte(512)), "*.*");
+   InitFileWatcher(&state->file_watcher, PlatformAllocArena(Kilobyte(512), "File Watcher"), "*.*");
 }
 
 void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path, bool preview);
@@ -588,7 +589,8 @@ void _PageButton(ui_id id, element *parent, char *name, DashboardPage page, Dash
    }
 }
 
-MultiLineGraphData test_graph = NewMultiLineGraph(PlatformAllocArena(Kilobyte(20)));
+MemoryArena *test_graph_arena = PlatformAllocArena(Kilobyte(20) + sizeof(MemoryArenaBlock), "test graph");
+MultiLineGraphData test_graph = NewMultiLineGraph(PushArena(test_graph_arena, Kilobyte(20)));
 
 void DrawUI(element *root, DashboardState *state) {
    //OutputDebugStringA(ToCString(Concat(Literal("fps "), ToString(root->context->fps), Literal("\n"))));
