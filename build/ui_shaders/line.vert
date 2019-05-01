@@ -1,10 +1,8 @@
-#version 450
-
 uniform mat4 Matrix;
 uniform float Width;
 
-layout(location = 0) in vec2 InPosition;
-layout(location = 3) in vec2 InNormal;
+layout(location = POSITION_SLOT) in vec2 InPosition;
+layout(location = NORMAL_SLOT) in vec2 InNormal;
 
 out VertexOut {
    vec2 Offset;

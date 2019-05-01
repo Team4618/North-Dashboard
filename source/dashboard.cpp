@@ -589,9 +589,6 @@ void _PageButton(ui_id id, element *parent, char *name, DashboardPage page, Dash
    }
 }
 
-MemoryArena *test_graph_arena = PlatformAllocArena(Kilobyte(20) + sizeof(MemoryArenaBlock), "test graph");
-MultiLineGraphData test_graph = NewMultiLineGraph(PushArena(test_graph_arena, Kilobyte(20)));
-
 void DrawUI(element *root, DashboardState *state) {
    //OutputDebugStringA(ToCString(Concat(Literal("fps "), ToString(root->context->fps), Literal("\n"))));
    ColumnLayout(root);
@@ -639,12 +636,6 @@ void DrawUI(element *root, DashboardState *state) {
          DrawSettings(page, &state->settings, robot_size_ft, robot_size_label, state->ncff_files);
       } break;
    }
-
-   //NOTE: TEST CODE----------------------------
-   test_graph.arena.alloc_block = NULL;
-   MultiLineGraph(page, &test_graph, V2(Size(page->bounds).x - 10, 400));
-   AddEntry(&test_graph, Literal("square"), (sinf(state->curr_time) > 0) ? 1 : -1, state->curr_time, 1);
-   AddEntry(&test_graph, Literal("sin"), sinf(state->curr_time), state->curr_time, 1);
 
    if(state->profiles.current.state == RobotProfileState::Connected) {
       string toggle_recording_text = Concat(state->manual_recorder.recording ? Literal("Stop") : Literal("Start"), Literal(" Manual Recording"));

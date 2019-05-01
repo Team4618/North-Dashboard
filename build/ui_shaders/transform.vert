@@ -1,8 +1,6 @@
-#version 450
-
 uniform mat4 Matrix;
 
-layout(location = 0) in vec2 InPosition;
+layout(location = POSITION_SLOT) in vec2 InPosition;
 
 void main()
 {

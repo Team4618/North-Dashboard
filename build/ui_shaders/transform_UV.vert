@@ -1,9 +1,7 @@
-#version 450
-
 uniform mat4 Matrix;
 
-layout(location = 0) in vec2 InPosition;
-layout(location = 1) in vec2 InUV;
+layout(location = POSITION_SLOT) in vec2 InPosition;
+layout(location = UV_SLOT) in vec2 InUV;
 
 out VertexOut {
    vec2 UV;

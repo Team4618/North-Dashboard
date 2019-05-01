@@ -1,5 +1,3 @@
-#version 450
-
 uniform vec4 Colour;
 uniform float Feather;
 uniform float Width;

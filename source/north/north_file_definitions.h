@@ -177,6 +177,19 @@ struct RobotRecording_Chunk {
    //RobotRecording_Group default_group
    //RobotRecording_Group [group_count]
 }
+
+struct RobotRecording_GroupSummary {
+   u64 next_summary_offset;
+
+   u8 name_length;
+   
+   u8 diagnostic_count;
+   u32 message_count;
+   u32 marker_count;
+   u32 path_count;
+
+   //char name[name_length]
+};
 */
 
 //TODO keep track of the totals somehow, like total diagnostic samples in a group

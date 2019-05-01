@@ -306,10 +306,11 @@ struct buffer {
    u8 *data;
 };
 
-buffer Buffer(u64 size, u8 *data) {
+buffer Buffer(u64 size, u8 *data, u64 offset = 0) {
    buffer result = {};
    result.size = size;
    result.data = data;
+   result.offset = offset;
    return result;
 }
 
@@ -355,6 +356,13 @@ void WriteString(buffer *b, string str) {
 }
 
 #define WriteStructData(b, type, name, code) do { type name = {}; code WriteStruct(b, &name); } while(false)
+
+void Advance(buffer *b, u32 by) {
+   Assert(by <= b->offset);
+   //NOTE: this Copy is kinda sketchy because src & dst are in the same buffer
+   Copy(b->data + by, b->offset - by, b->data);
+   b->offset -= by;
+}
 
 MemoryArena *__temp_arena = NULL;
 
@@ -419,6 +427,10 @@ string Concat(string a, string b, string c = EMPTY_STRING, string d = EMPTY_STRI
               string e = EMPTY_STRING, string f = EMPTY_STRING) {
    string inputs[] = {a, b, c, d, e, f};
    return Concat(inputs, ArraySize(inputs));
+}
+
+string operator+ (string a, string b) {
+	return Concat(a, b);
 }
 
 #include "stdio.h"
@@ -832,29 +844,112 @@ union mat4 {
    f32 e[16];
 };
 
-mat4 Identity()
-{
-   mat4 result = {};
-   result.e[0] = 1;
-   result.e[5] = 1;
-   result.e[10] = 1;
-   result.e[15] = 1;
-   return result;
+f32 &M(mat4 &m, u32 i, u32 j) {
+   return m.e[i + 4*j];
 }
 
-mat4 Orthographic(f32 top, f32 bottom, f32 left, f32 right, f32 nearPlane, f32 far)
-{
-   mat4 result = {};
+mat4 operator* (mat4 A, mat4 B) {
+	mat4 output = {};
+
+   for(u32 i = 0; i < 4; i++) {
+      for(u32 j = 0; j < 4; j++) {
+         M(output, i, j) = M(A, i, 0) * M(B, 0, j) + 
+                           M(A, i, 1) * M(B, 1, j) +
+                           M(A, i, 2) * M(B, 2, j) +
+                           M(A, i, 3) * M(B, 3, j);  
+      }
+   }
+
+	return output;
+}
+
+mat4 Identity() {
+   mat4 A = {};
+   M(A, 0, 0) = 1;
+   M(A, 1, 1) = 1;
+   M(A, 2, 2) = 1;
+   M(A, 3, 3) = 1;
+   return A;
+}
+
+mat4 Orthographic(f32 top, f32 bottom, f32 left, f32 right, f32 nearPlane, f32 far) {
+   mat4 A = {};
    
-   result.e[0] = 2 / (right - left);
-   result.e[5] = 2 / (top - bottom);
-   result.e[10] = -2 / (far - nearPlane);
-   result.e[12] = -(right + left) / (right - left);
-   result.e[13] = -(top + bottom) / (top - bottom);
-   result.e[14] = -(far + nearPlane) / (far - nearPlane);
-   result.e[15] = 1;
+   M(A, 0, 0) = 2 / (right - left);
+   M(A, 1, 1) = 2 / (top - bottom);
+   M(A, 2, 2) = -2 / (far - nearPlane);
+
+   M(A, 0, 3) = -(right + left) / (right - left);
+   M(A, 1, 3) = -(top + bottom) / (top - bottom);
+   M(A, 2, 3) = -(far + nearPlane) / (far - nearPlane);
+   M(A, 3, 3) = 1;
    
-   return result;
+   return A;
+}
+
+mat4 Perspective(f32 fovY, f32 aspect, f32 n, f32 f) {
+   mat4 A = {};
+
+   f32 tangent = tanf(fovY / 2);
+   f32 height = n * tangent;
+   f32 width = height * aspect; 
+
+   f32 t = height;
+   f32 b = -height;
+   f32 r = width;
+   f32 l = -width;
+   
+   M(A, 0, 0) = 2*n/(r - l);
+   M(A, 1, 1) = 2*n/(t - b);
+
+   M(A, 0, 2) = (r + l)/(r - l);
+   M(A, 1, 2) = (t + b)/(t - b);
+   M(A, 2, 2) = -(f + n)/(f - n);
+   M(A, 3, 2) = -1;
+
+   M(A, 2, 3) = -2*f*n/(f - n);
+   
+   return A;
+}
+
+mat4 Translation(v3 t) {
+   mat4 A = Identity();
+   M(A, 0, 3) = t.x;
+   M(A, 1, 3) = t.y;
+   M(A, 2, 3) = t.z;
+   return A;
+}
+
+mat4 Scale(v3 s) {
+   mat4 A = {};
+   M(A, 0, 0) = s.x;
+   M(A, 1, 1) = s.y;
+   M(A, 2, 2) = s.z;
+   M(A, 3, 3) = 1;
+   return A;
+}
+
+mat4 Rotation(v3 u, f32 t) {
+   mat4 A = {};
+
+   f32 c = cosf(t);
+   f32 s = sinf(t);
+
+   M(A, 0, 0) = u.x*u.x*(1-c) + c;
+   M(A, 1, 0) = u.x*u.y*(1-c) + u.z*s;
+   M(A, 2, 0) = u.x*u.z*(1-c) - u.y*s;
+
+   M(A, 0, 1) = u.x*u.y*(1-c) - u.z*s;
+   M(A, 1, 1) = u.y*u.y*(1-c) + c;
+   M(A, 2, 1) = u.y*u.z*(1-c) + u.x*s;
+
+   M(A, 0, 2) = u.x*u.z*(1-c) + u.y*s;
+   M(A, 1, 2) = u.y*u.z*(1-c) - u.x*s;
+   M(A, 2, 2) = u.z*u.z*(1-c) + c;
+
+   M(A, 3, 3) = 1;
+
+   return A;
 }
 
 //----------------------------------------------
@@ -1109,21 +1204,46 @@ NamedMemoryArena *mdbg_first_arena = NULL;
          return WriteEntireFile(ToCString(path), file);
       }
 
+      //TODO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
       //NOTE: this creates a file only if the file didnt already exist
       //      won't totally overwrite existing files like WriteEntireFile
-      void WriteFileRange(const char* path, buffer file, u64 offset) {
-         HANDLE file_handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+      // void WriteFileRange(const char* path, buffer file, u64 offset) {
+      //    HANDLE file_handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+      //                                     FILE_ATTRIBUTE_NORMAL, NULL);
+                                          
+      //    if(file_handle != INVALID_HANDLE_VALUE) {
+      //       //TODO: write at offset
+      //       // DWORD number_of_bytes_written;
+      //       // WriteFile(file_handle, file.data, file.offset, &number_of_bytes_written, NULL);
+      //       CloseHandle(file_handle);
+      //    }
+      // }
+
+      void WriteFileAppend(const char* path, buffer file) {
+         HANDLE file_handle = CreateFileA(path, GENERIC_WRITE | FILE_APPEND_DATA, 
+                                          0, NULL, OPEN_ALWAYS,
                                           FILE_ATTRIBUTE_NORMAL, NULL);
                                           
          if(file_handle != INVALID_HANDLE_VALUE) {
-            //TODO: write at offset
-            // DWORD number_of_bytes_written;
-            // WriteFile(file_handle, file.data, file.offset, &number_of_bytes_written, NULL);
+            SetFilePointer(file_handle, 0, NULL, FILE_END);
+            DWORD number_of_bytes_written;
+            WriteFile(file_handle, file.data, file.offset, &number_of_bytes_written, NULL);
             CloseHandle(file_handle);
          }
       }
 
-      //TODO: WriteFileAppend
+      void WriteFileAppend(string path, buffer file) {
+         return WriteFileAppend(ToCString(path), file);
+      }
+
+      void CreateFolder(const char* path) {
+         CreateDirectoryA(path, NULL);
+      }
+
+      void CreateFolder(string path) {
+         CreateFolder(ToCString(path));
+      }
 
       struct FileListLink {
          FileListLink *next;
@@ -1290,21 +1410,21 @@ NamedMemoryArena *mdbg_first_arena = NULL;
 
       struct Timer {
          LARGE_INTEGER frequency;
-         LARGE_INTEGER timer;
+         LARGE_INTEGER last_time;
       };
 
       Timer InitTimer() {
          Timer result = {};
-         QueryPerformanceFrequency(&result.frequency); 
-         QueryPerformanceCounter(&result.timer);
+         QueryPerformanceFrequency(&result.frequency);
+         QueryPerformanceCounter(&result.last_time);
          return result;
       }
 
       f32 GetDT(Timer *timer) {
          LARGE_INTEGER new_time;
          QueryPerformanceCounter(&new_time);
-         f32 dt = (f32)(new_time.QuadPart - timer->timer.QuadPart) / (f32)timer->frequency.QuadPart;
-         timer->timer = new_time;
+         f32 dt = (f32)(new_time.QuadPart - timer->last_time.QuadPart) / (f32)timer->frequency.QuadPart;
+         timer->last_time = new_time;
          
          return dt;
       }
