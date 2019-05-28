@@ -53,11 +53,13 @@ void HandleConnectionStatus(DashboardState *state) {
       }
    }
    
-   if((state->curr_time - last_recv_time) > 2)
-      tcp_connected = false; 
+   if((state->curr_time - last_recv_time) > 2) {
+      tcp_connected = false;
+   }
 
    if(was_connected && !tcp_connected) {
       HandleDisconnect(state);
+      OutputDebugStringA(ToCString(Literal("Disconnecting, t = ") + ToString(state->curr_time - last_recv_time) + Literal("\n")));
       
       closesocket(tcp_socket);
       CreateSocket();
@@ -82,7 +84,8 @@ void HandleConnectionStatus(DashboardState *state) {
          struct sockaddr_in server_addr = {};
          server_addr.sin_family = AF_INET;
          //TODO: actually generate the ip from the team number string
-         server_addr.sin_addr.s_addr = inet_addr("10.46.18.2"); 
+         // server_addr.sin_addr.s_addr = inet_addr("10.46.18.2");
+         server_addr.sin_addr.s_addr = inet_addr("10.0.5.4");
          server_addr.sin_port = htons(5800);
 
          if(connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr)) != 0) {
@@ -96,6 +99,39 @@ void HandleConnectionStatus(DashboardState *state) {
       PacketHeader heartbeat = {0, PacketType::Heartbeat};
       send(tcp_socket, (char *) &heartbeat, sizeof(heartbeat), 0);
    }
+}
+
+void HandleNetworking(DashboardState *state) {
+   bool has_packets = true;
+   while(has_packets) {
+      PacketHeader header = {};
+      u32 recv_return = recv(tcp_socket, (char *) &header, sizeof(header), MSG_PEEK);
+      
+      if(recv_return == SOCKET_ERROR) {
+         has_packets = false;
+         s32 wsa_error = WSAGetLastError();
+
+         if((wsa_error != 0) && (wsa_error != WSAEWOULDBLOCK)) {
+            //an actual error happened
+         }
+      } else if(recv_return == sizeof(PacketHeader)) {
+         buffer packet = PushTempBuffer(header.size + sizeof(PacketHeader));
+         recv_return = recv(tcp_socket, (char *) packet.data, packet.size, MSG_PEEK);
+         if(recv_return == packet.size) {
+            recv(tcp_socket, (char *) packet.data, packet.size, 0);
+            
+            ConsumeStruct(&packet, PacketHeader);
+            HandlePacket(state, (PacketType::type) header.type, packet);
+         
+            tcp_connected = true;
+            last_recv_time = state->curr_time;
+         } else {
+            has_packets = false;
+         }
+      }
+   }
+
+   HandleConnectionStatus(state);
 }
 
 #include "test_file_writing.cpp"
@@ -152,41 +188,9 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       }
 
       Reset(__temp_arena);
-
-      {
-         bool has_packets = true;
-         while(has_packets) {
-            //TODO: technically we can recieve like, half a header or something
-            //      we should protect aginst that
-            PacketHeader header = {};
-            u32 recv_return = recv(tcp_socket, (char *) &header, sizeof(header), 0);
-            
-            if(recv_return == SOCKET_ERROR) {
-               has_packets = false;
-               s32 wsa_error = WSAGetLastError();
-
-               if((wsa_error != 0) && (wsa_error != WSAEWOULDBLOCK)) {
-                  //an actual error happened
-               }
-            } else {
-               //TODO: what if the packet isnt fully sent yet or something
-               // OutputDebugStringA(ToCString(Concat(Literal("Recieved Packet, Size = "), ToString(header.size), Literal("\n") )));
-
-               buffer packet = PushTempBuffer(header.size);
-               recv(tcp_socket, (char *) packet.data, packet.size, 0);
-
-               HandlePacket(&state, (PacketType::type) header.type, packet);
-               
-               tcp_connected = true;
-               last_recv_time = state.curr_time;
-            }
-         }
-      }
-      
-      HandleConnectionStatus(&state);
+      HandleNetworking(&state);
 
       Reset(__temp_arena);
-      
       element *root_element = beginFrame(window.size, &ui_context, dt);
       DrawUI(root_element, &state);
       endFrame(&window, root_element);

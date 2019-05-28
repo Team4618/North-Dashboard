@@ -276,7 +276,7 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
                          bool immutable = false)
 {
    _ui_scope __scope__(parent, id);
-   element *base = Panel(parent, Size(size).Padding(padding).Margin(margin).Layout(ColumnLayout));
+   element *base = ColumnPanel(parent, Width(size.x).Padding(padding).Margin(margin));
    element *graph = Panel(base, Size(size.x, size.y - 40).Layout(ColumnLayout).Captures(INTERACTION_CLICK));
    element *control_row = Panel(base, Size(size.x, 40).Padding(0, 5).Layout(RowLayout));
    
@@ -319,8 +319,18 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
 
    MemoryArena *frame_arena = parent->context->frame_arena;
 
+   //TODO: redo this stuff with a flow layout or something
+   f32 row_used_width = 0;
+   element *curr_button_row = Panel(base, Size(size.x, 40).Padding(0, 5).Layout(RowLayout));
+
    for(LineGraph *curr_graph = data->first; curr_graph; curr_graph = curr_graph->next) {
-      ui_button btn = _Button(POINTER_UI_ID(curr_graph), control_row, curr_graph->name, control_button_style);
+      if((Size(curr_button_row).x - row_used_width) < 100) {
+         curr_button_row = Panel(base, Size(size.x, 40).Padding(0, 5).Layout(RowLayout));
+         row_used_width = 0;
+      }
+      
+      ui_button btn = _Button(POINTER_UI_ID(curr_graph), curr_button_row, curr_graph->name, control_button_style);
+      row_used_width += Size(btn.e).x;
 
       if(btn.clicked) {
          curr_graph->hidden = !curr_graph->hidden;
@@ -444,6 +454,8 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
          }
       }
    }
+
+   FinalizeLayout(base);
 
    return graph;
 }

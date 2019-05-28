@@ -503,6 +503,14 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    return result;
 }
 
+// struct RenderCommandType_GL {
+
+// };
+
+// struct RenderCommand_GL {
+
+// };
+
 void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 transform, ui_impl_win32_window *window) {
    openglContext *gl = &window->gl;
    glScissor(bounds.min.x, window->size.y - bounds.max.y, Size(bounds).x, Size(bounds).y);

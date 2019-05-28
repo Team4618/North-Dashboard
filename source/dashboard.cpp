@@ -1,6 +1,6 @@
-#include "north/north_common_definitions.h"
-#include "north/north_file_definitions.h"
-#include "north/north_network_definitions.h"
+#include "north_defs/north_common_definitions.h"
+#include "north_defs/north_file_definitions.h"
+#include "north_defs/north_network_definitions.h"
 
 string ToString(North_GameMode::type mode) {
    switch(mode) {
@@ -37,12 +37,12 @@ void SetDiagnosticsGraphUnits(MultiLineGraphData *data) {
 #include "theme.cpp"
 
 #define INCLUDE_DRAWSETTINGS
-#include "north_settings_utils.cpp"
-#include "robot_recording_utils.cpp"
+#include "north_shared/north_settings_utils.cpp"
+#include "north_shared/robot_recording_utils.cpp"
 #define INCLUDE_DRAWPROFILES
-#include "robot_profile_utils.cpp"
+#include "north_shared/robot_profile_utils.cpp"
 
-#include "auto_project_utils.cpp"
+#include "north_shared/auto_project_utils.cpp"
 
 struct ConnectedMessage {
    string text;
@@ -368,7 +368,15 @@ void DrawConnectedGroup(ConnectedGroup *group, element *page, ui_field_topdown *
    }
 
    if(!group->hide_paths) {
-
+      for(u32 i = 0; i < group->path_count; i++) {
+         ConnectedPath *path = group->paths + i;
+         
+         for(u32 j = 0; j < (path->control_point_count - 1); j++) {
+            North_HermiteControlPoint a = path->control_points[j];
+            North_HermiteControlPoint b = path->control_points[j + 1];
+            CubicHermiteSpline(field, a.pos, a.tangent, b.pos, b.tangent, BLACK);
+         }
+      }
    }
 }
 
@@ -418,6 +426,13 @@ void DrawHome(element *full_page, DashboardState *state) {
          for(ConnectedGroup *curr_group = conn_state->first_group; curr_group; curr_group = curr_group->next_in_list) {
             DrawConnectedGroup(curr_group, page, &field);
          }
+
+         //TODO: fix conn_state->curr_pos_sample, it seems broken
+         // for(u32 i = 0; i < conn_state->pos_sample_count; i++) {
+         //    bool latest_sample = i == (conn_state->pos_sample_count - 1);
+         //    rect2 sample_bounds = RectCenterSize(GetPoint(&field, conn_state->pos_samples[i].pos), (latest_sample ? 1 : 0.5) * robot_size_px);
+         //    Rectangle(field.e, sample_bounds, latest_sample ? RED : GREEN);
+         // }
       }
       
       if(starting_pos_selected) {
@@ -551,16 +566,37 @@ void DrawRecordings(element *full_page, DashboardState *state) {
       }
    } else {
       if(state->recording.loaded) {
+         static bool is_playing = false;
+         if(Button(top_bar, is_playing ? "Stop" : "Play", menu_button).clicked) {
+            is_playing = !is_playing;
+         }
+
+         if(is_playing) {
+            state->recording.curr_time += page->context->dt;
+            if(state->recording.curr_time > state->recording.max_time) {
+               is_playing = false;
+               state->recording.curr_time = state->recording.max_time;
+            }
+         }
+
          ui_field_topdown field = {};
 
          if(state->settings.field.loaded) {
             field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
                                  Clamp(0, Size(page->bounds).x, 700));
 
+            f32 last_sample_time = 0;
             for(s32 i = 0; i < state->recording.robot_sample_count; i++) {
                RobotRecording_RobotStateSample *sample = state->recording.robot_samples + i;
                v2 p = GetPoint(&field, sample->pos);
                Rectangle(field.e, RectCenterSize(p, V2(5, 5)), RED);
+
+               if((last_sample_time <= state->recording.curr_time) && (state->recording.curr_time <= sample->time)) {
+                  v2 robot_size = V2(0.4, 0.4); //TODO: get this from somewhere
+                  DrawRobot(&field, robot_size, sample->pos, ToRadians(sample->angle), BLACK);
+               }
+
+               last_sample_time = sample->time;
             }
          } else {
             Label(page, "No field loaded", 20, BLACK);
