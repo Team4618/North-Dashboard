@@ -70,6 +70,7 @@ struct Welcome_PacketHeader {
 };
 //-----------------------------------------
 
+#if 0
 //-----------------------------------------
 struct CurrentParameters_Parameter {
    u8 is_array;
@@ -173,6 +174,126 @@ struct ParameterOp_PacketHeader {
    //char [param_name_length]
 };
 //--------------------------------------
+
+#else
+
+//-----------------------------------------
+struct CurrentParameters_Parameter {
+   u8 is_array;
+   u8 name_length;
+   u8 value_count; //Ignored if is_array is false
+   //char name[name_length]
+   //f32 [value_count]
+};
+
+struct CurrentParameters_PacketHeader {
+   u16 parameter_count;
+   // CurrentParameters_Parameter [parameter_count]
+};
+//-----------------------------------------
+
+//-----------------------------------------
+//Field overlay graphics
+struct Polyline {
+   v2 points;
+   u32 point_count;
+   
+   v4 colour; //make this an array? gradients along the path?
+
+   u16 name_length;
+   //char name[name_length]
+};
+
+//NOTE: rectangles get converted to this
+struct Triangles {
+   v2 vertices;
+   u32 triangle_count; //vertex_count = 3 * triangle_count
+
+   v4 colour;
+
+   u16 name_length;
+   //char name[name_length]
+};
+
+struct Points {
+   v2 points;
+   u32 point_count;
+
+   v4 colour;
+
+   u16 name_length;
+   //char name[name_length]
+};
+
+//Other things
+struct RobotPose {
+   v2 pos;
+   f32 angle;
+
+   u32 additional_data_size;
+   //u8 additional_data [additional_data_size]
+
+   u16 name_length;
+   //char name[name_length]
+};
+
+struct DiagnosticValue {
+   f32 value;
+   u8 unit_name_length;
+   u16 name_length;
+
+   //char unit_name[unit_name_length]
+   //char name[name_length]
+};
+
+struct Message {
+   u16 text_length;
+   u16 name_length;
+
+   //char text[text_length]
+   //char name[name_length]
+};
+
+struct OverlayDataHeader {
+   u64 frame_count; //so we know when to get rid of stuff
+   f32 time;
+
+   u16 polyline_count;
+   u16 triangles_count;
+   u16 points_count;
+   u16 robot_pose_count;
+   u16 diagnostic_count;
+   u16 message_count;
+
+   // Polyline [polyline_count]
+   // Triangles [triangles_count]
+   // Points [points_count]
+   // RobotPose [robot_pose_count]
+   // DiagnosticValue [diagnostic_count]
+   // Message [message_count]
+};
+//-----------------------------------------
+
+//-----------------------------------------
+namespace ParameterOp_Type {
+   enum type {
+      SetValue = 1, //NOTE: for is_array = false
+      AddValue = 2, //NOTE: for is_array = true
+      RemoveValue = 3, //NOTE: for is_array = true
+   };
+};
+
+struct ParameterOp_PacketHeader {
+   u8 type;
+   u8 param_name_length;
+
+   f32 value; //NOTE: only used by SetValue & AddValue
+   u32 index; //NOTE: ignored if is_array = false
+   
+   //char [param_name_length]
+};
+//-----------------------------------------
+#endif
 
 struct SetState_PacketHeader {
    v2 pos;

@@ -223,6 +223,12 @@ void path_data_lerp(InterpolatingMap_Leaf *leaf_a, InterpolatingMap_Leaf *leaf_b
    result->d2theta_ds2 = lerp(a->d2theta_ds2, t, b->d2theta_ds2);
 }
 
+//TODO: FORMALIZE----------------------------------------------
+f32 Angle(v2 v) {
+   return ToDegrees(atan2(v.y, v.x));
+}
+//-------------------------------------------------------------
+
 f32 BuildPathMap(InterpolatingMap *len_to_data, North_HermiteControlPoint *points, u32 point_count) {
    InterpolatingMapSamples samples = ResetMap(len_to_data);
    f32 t_step = (f32)(point_count - 1) / (f32)(samples.count - 1);

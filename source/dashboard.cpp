@@ -394,31 +394,31 @@ void DrawHome(element *full_page, DashboardState *state) {
       ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size,
                                             Clamp(0, Size(page->bounds).x, 700));
 
-      v2 robot_size_px =  FeetToPixels(&field, profile->size);
-      for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
-         Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
-         UI_SCOPE(page->context, starting_pos);
+      // v2 robot_size_px =  FeetToPixels(&field, profile->size);
+      // for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
+      //    Field_StartingPosition *starting_pos = state->settings.field.starting_positions + i;
+      //    UI_SCOPE(page->context, starting_pos);
          
-         element *field_starting_pos = Panel(field.e, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px),
-                                             Captures(INTERACTION_CLICK));
+      //    element *field_starting_pos = Panel(field.e, RectCenterSize(GetPoint(&field, starting_pos->pos), robot_size_px),
+      //                                        Captures(INTERACTION_CLICK));
          
-         bool is_selected = starting_pos_selected && (Length(selected_starting_pos.pos - starting_pos->pos) < 0.01);    
-         v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
-                                 -sinf(starting_pos->angle * (PI32 / 180)));
-         Background(field_starting_pos, is_selected ? GREEN : RED);
-         Line(field_starting_pos, BLACK, 2,
-              Center(field_starting_pos->bounds),
-              Center(field_starting_pos->bounds) + 10 * direction_arrow);           
+      //    bool is_selected = starting_pos_selected && (Length(selected_starting_pos.pos - starting_pos->pos) < 0.01);    
+      //    v2 direction_arrow = V2(cosf(starting_pos->angle * (PI32 / 180)), 
+      //                            -sinf(starting_pos->angle * (PI32 / 180)));
+      //    Background(field_starting_pos, is_selected ? GREEN : RED);
+      //    Line(field_starting_pos, BLACK, 2,
+      //         Center(field_starting_pos->bounds),
+      //         Center(field_starting_pos->bounds) + 10 * direction_arrow);           
 
-         if(WasClicked(field_starting_pos)) {
-            starting_pos_selected = true;
-            selected_starting_pos = *starting_pos;
+      //    if(WasClicked(field_starting_pos)) {
+      //       starting_pos_selected = true;
+      //       selected_starting_pos = *starting_pos;
 
-            ReadProjectsStartingAt(&state->auto_programs, 0, starting_pos->pos, profile);
+      //       ReadProjectsStartingAt(&state->auto_programs, 0, starting_pos->pos, profile);
 
-            //TODO: send starting pos to robot
-         }   
-      }
+      //       //TODO: send starting pos to robot
+      //    }   
+      // }
       
       if(profile->state == RobotProfileState::Connected) {
          ConnectedState *conn_state = &state->connected;
@@ -426,6 +426,11 @@ void DrawHome(element *full_page, DashboardState *state) {
          for(ConnectedGroup *curr_group = conn_state->first_group; curr_group; curr_group = curr_group->next_in_list) {
             DrawConnectedGroup(curr_group, page, &field);
          }
+
+         //-----------------------------
+         //TODO: curr_pos_sample is really weird, make it act more reasonable
+         // RobotRecording_RobotStateSample curr_state = conn_state->pos_samples[conn_state->curr_pos_sample];
+         // DrawRobot(&field, profile->size, curr_state.pos, curr_state.angle, BLACK);
 
          //TODO: fix conn_state->curr_pos_sample, it seems broken
          // for(u32 i = 0; i < conn_state->pos_sample_count; i++) {

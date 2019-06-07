@@ -5,6 +5,8 @@ struct ui_field_topdown {
    bool clicked;
 };
 
+v2 GetPoint(ui_field_topdown *field, v2 p_in_ft);
+
 #define FieldTopdown(...) _FieldTopdown(GEN_UI_ID, __VA_ARGS__)
 ui_field_topdown _FieldTopdown(ui_id id, element *parent, texture background_image, 
                    v2 size_in_ft, f32 width) {
@@ -18,6 +20,13 @@ ui_field_topdown _FieldTopdown(ui_id id, element *parent, texture background_ima
    result.bounds = e->bounds;
    result.e = e;
    result.clicked = WasClicked(e);
+
+   if(parent->context->debug_mode != UIDebugMode_Disabled) {
+      Rectangle(e, RectCenterSize(GetPoint(&result, V2(0, 0)), V2(5, 5)), BLACK);
+      Rectangle(e, RectCenterSize(GetPoint(&result, V2(0.25 * size_in_ft.x, 0)), V2(5, 5)), BLACK);
+      Rectangle(e, RectCenterSize(GetPoint(&result, V2(0, 0.25 * size_in_ft.x)), V2(5, 5)), BLACK);
+   }
+
    return result;
 }
 
@@ -37,12 +46,14 @@ f32 FeetToPixels(ui_field_topdown *field, f32 in_ft) {
    return in_px;
 }
 
+//TODO: remove?
 v2 FeetToPixels(ui_field_topdown *field, v2 in_ft) {
    return V2(FeetToPixels(field, in_ft.x), FeetToPixels(field, in_ft.y));
 }
+//-------------
 
 v2 GetPoint(ui_field_topdown *field, v2 p_in_ft) {
-   return Center(field->bounds) + FeetToPixels(field, p_in_ft);
+   return Center(field->bounds) + V2(FeetToPixels(field, p_in_ft.x), -FeetToPixels(field, p_in_ft.y));
 }
 
 void CubicHermiteSpline(ui_field_topdown *field, 
@@ -59,6 +70,13 @@ void CubicHermiteSpline(ui_field_topdown *field,
 
    _Line(field->e, colour, thickness, points, point_count);
 }
+
+//TODO: FORMALIZE----------------------------------------------
+v2 DirectionNormal(f32 angle) {
+   return V2(cosf(ToRadians(angle)), 
+             sinf(ToRadians(angle)));
+}
+//-------------------------------------------------------------
 
 void DrawRobot(ui_field_topdown *field, v2 size, 
                v2 pos, f32 angle, v4 colour)

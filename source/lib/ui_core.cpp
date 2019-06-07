@@ -425,12 +425,12 @@ void Arc(element *e, v2 center, f32 radius, f32 angle1, f32 angle2, bool clockwi
    _Line(e, colour, thickness, points, point_count, false);
 }
 
-v2 DirectionNormal(f32 angle) {
+v2 UI_DirectionNormal(f32 angle) {
    return V2(cosf(ToRadians(angle)), 
              -sinf(ToRadians(angle)));
 }
 
-f32 Angle(v2 v) {
+f32 UI_Angle(v2 v) {
    return ToDegrees(atan2(-v.y, v.x));
 }
 
