@@ -57,6 +57,7 @@ struct Field_FileHeader {
 };
 //-----------------------------------------------------------
 
+#if 0
 //RobotProfile-----------------------------------------------
 struct RobotProfile_Parameter {
    u8 is_array;
@@ -214,6 +215,122 @@ struct RobotRecording_FileHeader {
    //RobotRecording_Group [group_count]
 };
 //-----------------------------------------------------------
+#else
+//RobotProfile-----------------------------------------------
+struct RobotProfile_Parameter {
+   u8 is_array;
+   u8 name_length; 
+   u8 value_count; //Ignored if is_array is false
+   //char name[name_length]
+   //f32 [value_count]
+};
+
+struct RobotProfile_Command {
+   u8 name_length;
+   u8 param_count;
+   u8 type; //NOTE: North_CommandExecutionType
+   //char name[name_length]
+   //{ u8 length; char [length]; } [param_count]
+};
+
+//NOTE: unused
+/*
+namespace RobotProfile_Flags {
+   enum type {
+
+   };
+};
+*/
+
+struct RobotProfile_FileHeader {
+#define ROBOT_PROFILE_MAGIC_NUMBER RIFF_CODE("NCRP") 
+#define ROBOT_PROFILE_CURR_VERSION 0
+   u8 conditional_count;
+   u8 parameter_count;
+   u8 command_count;
+   f32 robot_width;
+   f32 robot_length;
+   u32 flags;
+
+   //{ u8 length; char [length]; } [conditional_count]
+   //RobotProfile_Parameter [parameter_count]
+   //RobotProfile_Command [command_count]
+};
+//-----------------------------------------------------------
+
+//RobotRecording---------------------------------------------
+struct RobotRecording_VertexData {
+   u32 point_count;
+   v4 colour;
+
+   f32 begin_time;
+   f32 end_time;
+
+   // v2 points[point_count]
+};
+
+struct RobotRecording_RobotStateSample {
+   v2 pos;
+   f32 angle;
+   f32 time;
+};
+
+struct RobotRecording_RobotPose {
+   u32 sample_count;
+   // RobotRecording_RobotStateSample [sample_count]
+};
+
+struct RobotRecording_DiagnosticSample {
+   f32 value;
+   f32 time;
+};
+
+struct RobotRecording_Diagnostic {
+   u8 unit_length;
+   u32 sample_count;
+   //char [unit_length]
+   //RobotRecording_DiagnosticSample [sample_count]
+};
+
+struct RobotRecording_Message {
+   u16 text_length;
+   f32 begin_time;
+   f32 end_time;
+   //char [text_length]
+};
+
+struct RobotRecording_Entry {
+   u8 type; //North_VisType
+   u16 name_length;
+
+   u32 recording_count;
+
+   u32 size; //size of the following block of data (not including the name)
+   //char name[name_length]
+   //RobotRecording_[type] [recording_count]
+};
+
+struct RobotRecording_Chunk {
+   u32 entry_count;
+   //RobotRecording_Entry [entry_count]
+};
+
+struct RobotRecording_FileHeader {
+#define ROBOT_RECORDING_MAGIC_NUMBER RIFF_CODE("NCRR") 
+#define ROBOT_RECORDING_CURR_VERSION 0
+   u64 timestamp;
+
+   u8 robot_name_length;
+   f32 robot_width;
+   f32 robot_length;
+
+   u32 chunk_count;
+
+   //char [robot_name_length]
+   //RobotRecording_Chunk [chunk_count]
+};
+//-----------------------------------------------------------
+#endif
 
 //AutonomousProgram------------------------------------------
 struct AutonomousProgram_ContinuousEvent {

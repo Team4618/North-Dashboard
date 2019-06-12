@@ -193,84 +193,45 @@ struct CurrentParameters_PacketHeader {
 //-----------------------------------------
 
 //-----------------------------------------
-//Field overlay graphics
-struct Polyline {
-   v2 points;
-   u32 point_count;
-   
-   v4 colour; //make this an array? gradients along the path?
-
-   u16 name_length;
-   //char name[name_length]
-};
-
-//NOTE: rectangles get converted to this
-struct Triangles {
-   v2 vertices;
-   u32 triangle_count; //vertex_count = 3 * triangle_count
-
+struct Vis_VertexData {
+   u32 point_count; //NOTE: must be a multiple of 3 if drawing triangles
    v4 colour;
 
-   u16 name_length;
-   //char name[name_length]
+   //v2 points[point_count]
 };
 
-struct Points {
-   v2 points;
-   u32 point_count;
-
-   v4 colour;
-
-   u16 name_length;
-   //char name[name_length]
-};
-
-//Other things
-struct RobotPose {
+struct Vis_RobotPose {
    v2 pos;
    f32 angle;
-
-   u32 additional_data_size;
-   //u8 additional_data [additional_data_size]
-
-   u16 name_length;
-   //char name[name_length]
 };
 
-struct DiagnosticValue {
+struct Vis_Diagnostic {
    f32 value;
    u8 unit_name_length;
-   u16 name_length;
 
    //char unit_name[unit_name_length]
-   //char name[name_length]
 };
 
-struct Message {
+struct Vis_Message {
    u16 text_length;
+   //char text[text_length]
+};
+
+struct Vis_Entry {
+   u8 type; //North_VisType
    u16 name_length;
 
-   //char text[text_length]
+   u32 size; //size of the following block of data (not including the name)
    //char name[name_length]
+   //Vis_[type]   
 };
 
-struct OverlayDataHeader {
-   u64 frame_count; //so we know when to get rid of stuff
+struct VisHeader {
+   u64 frame_number; //so we know when to get rid of stuff
    f32 time;
 
-   u16 polyline_count;
-   u16 triangles_count;
-   u16 points_count;
-   u16 robot_pose_count;
-   u16 diagnostic_count;
-   u16 message_count;
-
-   // Polyline [polyline_count]
-   // Triangles [triangles_count]
-   // Points [points_count]
-   // RobotPose [robot_pose_count]
-   // DiagnosticValue [diagnostic_count]
-   // Message [message_count]
+   u32 entry_count;
+   //Vis_Entry [entry_count]
 };
 //-----------------------------------------
 

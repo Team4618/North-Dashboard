@@ -23,6 +23,8 @@ typedef double f64;
 #define Megabyte(BYTE) Kilobyte(BYTE) * 1024
 #define Gigabyte(BYTE) Megabyte(BYTE) * 1024
 
+// #define offsetof(st, m) ( (size_t)&(((st *)0)->m) )
+
 #define RIFF_CODE(str) ( ((str)[0] << 0) | ((str)[1] << 8) | ((str)[2] << 16) | ((str)[3] << 24) )
 
 #define ZeroStruct(var) _Zero((u8 *) (var), sizeof(*(var)))
@@ -42,10 +44,36 @@ void Copy(void *src_in, u32 size, void *dest_in) {
    }
 }
 
+u32 StringLength(char *text) {
+   u32 length = 0;
+   while(*text) {
+      length++;
+      text++;
+   }
+
+   return length;
+}
+
 //TODO: utf-8
 struct string {
    char *text;
    u32 length;
+
+   string () {
+      this->text = 0;
+      this->length = NULL;
+   }
+
+   string (char *c_str) {
+      this->text = c_str;
+      this->length = StringLength(c_str);
+   }
+
+   string& operator= (char *c_str) {
+      this->text = c_str;
+      this->length = StringLength(c_str);
+      return *this;
+   }
 };
 
 const string EMPTY_STRING = {};
@@ -57,17 +85,9 @@ string String(char *text, u32 length) {
    return result;
 }
 
-u32 StringLength(char *text) {
-   u32 length = 0;
-   while(*text) {
-      length++;
-      text++;
-   }
+// #define ArrayLiteral(array) String((array), ArraySize(array))
 
-   return length;
-}
-
-#define ArrayLiteral(array) String((array), ArraySize(array))
+//TODO: get rid of this (or just rename it to String & get rid of most of its uses)
 string Literal(char *text) {
    string result = {};
 
@@ -335,6 +355,12 @@ string ConsumeString(buffer *b, u32 length) {
 }
 
 #define ConsumeAndCopyArray(arena, b, struct, length) PushArrayCopy(arena, struct, ConsumeArray(b, struct, length), length)
+string ConsumeAndCopyString(buffer *b, u32 length, MemoryArena *arena) {
+   string result = {};
+   result.length = length;
+   result.text = ConsumeAndCopyArray(arena, b, char, length);
+   return result;
+}
 
 #define PeekStruct(b, struct) (struct *) PeekSize(b, sizeof(struct))
 u8 *PeekSize(buffer *b, u64 size) {
@@ -344,11 +370,18 @@ u8 *PeekSize(buffer *b, u64 size) {
 
 #define WriteStruct(b, struct_data) WriteSize(b, (u8 *)(struct_data), sizeof(*(struct_data)))
 #define WriteArray(b, first_elem, length) WriteSize(b, (u8 *)(first_elem), (length) * sizeof(*(first_elem)))
-void WriteSize(buffer *b, void *in_data, u64 size) {
-   u8 *data = (u8 *) in_data;
+u8 *PushSize(buffer *b, u64 size) {
    Assert((b->size - b->offset) >= size);
-   Copy(data, size, b->data + b->offset);
+   u8 *result = b->data + b->offset;
    b->offset += size;
+   return result;
+}
+
+u8 *WriteSize(buffer *b, void *in_data, u64 size) {
+   u8 *data = (u8 *) in_data;
+   u8 *result = PushSize(b, size);
+   Copy(data, size, result);
+   return result;
 }
 
 void WriteString(buffer *b, string str) {
@@ -431,6 +464,50 @@ string Concat(string a, string b, string c = EMPTY_STRING, string d = EMPTY_STRI
 
 string operator+ (string a, string b) {
 	return Concat(a, b);
+}
+
+struct SplitString {
+   string *parts;
+   u32 part_count;
+};
+
+SplitString split(string s, char split_c, MemoryArena *arena = __temp_arena) {
+   for(u32 i = 0; (i < s.length) && (s.text[0] == split_c); i++) {
+      s.text++;
+      s.length--;
+   }
+
+   while((s.length > 0) && (s.text[s.length - 1] == split_c)) {
+      s.length--;
+   }
+   
+   u32 part_count = (s.length > 0);
+   for(u32 i = 0; i < s.length; i++) {
+      if((s.text[i] == split_c) && (s.text[i + 1] != split_c)) {
+         part_count++;
+      }
+   }
+
+   string *parts = PushArray(arena, string, part_count);
+   u32 part_i = 0;
+   u32 char_i = 0;
+   while(char_i < s.length) {
+      if(s.text[char_i] != split_c) {
+         u32 length = 1;
+         while(((char_i + length) < s.length) && (s.text[char_i + length] != split_c)) {
+            length++;
+         }
+         parts[part_i++] = PushCopy(arena, String(s.text + char_i, length));
+         char_i += length;
+      } else {
+         char_i++;
+      }
+   }
+
+   SplitString result = {};
+   result.part_count = part_count;
+   result.parts = parts;
+   return result;
 }
 
 #include "stdio.h"
@@ -581,6 +658,13 @@ v4 operator* (f32 s, v4 v) {
    return output;
 }
 
+bool operator==(v4 a, v4 b) {
+   return (a.x == b.x) && 
+          (a.y == b.y) && 
+          (a.z == b.z) && 
+          (a.w == b.w);
+}
+
 v4 lerp(v4 a, f32 t, v4 b) {
    return V4(lerp(a.r, t, b.r),
              lerp(a.g, t, b.g),
@@ -653,6 +737,15 @@ v2 operator/ (v2 a, v2 b) {
 	output.x = a.x / b.x;
 	output.y = a.y / b.y;
 	return output;
+}
+
+bool operator==(v2 a, v2 b) {
+   return (a.x == b.x) && 
+          (a.y == b.y);
+}
+
+bool operator!=(v2 a, v2 b) {
+   return !(a == b);
 }
 
 v2 Perp(v2 v) {
@@ -760,6 +853,14 @@ rect2 operator+ (v2 offset, rect2 r) {
 	result.min = result.min + offset;
 	result.max = result.max + offset;
 	return result;
+}
+
+bool operator== (rect2 a, rect2 b) {
+   return (a.min == b.min) && (a.max == b.max);
+}
+
+bool operator!= (rect2 a, rect2 b) {
+   return (a.min != b.min) || (a.max != b.max);
 }
 
 inline rect2 RectMinSize(v2 min, v2 size) {
@@ -1236,6 +1337,44 @@ NamedMemoryArena *mdbg_first_arena = NULL;
       void WriteFileAppend(string path, buffer file) {
          return WriteFileAppend(ToCString(path), file);
       }
+
+      //NEW FILE STUFF---------------------------------
+      u64 CreateFile(const char *path) {
+         HANDLE file_handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                                          FILE_ATTRIBUTE_NORMAL, NULL);
+         return (u64) file_handle;
+      }
+
+      u64 CreateFile(string path) {
+         return CreateFile(ToCString(path));
+      }
+
+      void CloseFile(u64 handle) {
+         CloseHandle((HANDLE) handle);
+      }
+
+      void WriteFileRange(u64 handle, buffer b, u64 file_offset) {
+         HANDLE file_handle = (HANDLE) handle;
+         
+         if(file_handle != INVALID_HANDLE_VALUE) {
+            //TODO: this can only do 32 bit offsets right now
+            SetFilePointer(file_handle, (u32)file_offset, NULL, FILE_BEGIN);
+
+            DWORD number_of_bytes_written;
+            WriteFile(file_handle, b.data, b.offset, &number_of_bytes_written, NULL);
+         }
+      }
+
+      void WriteFileAppend(u64 handle, buffer b) {
+         HANDLE file_handle = (HANDLE) handle;
+         
+         if(file_handle != INVALID_HANDLE_VALUE) {
+            SetFilePointer(file_handle, 0, NULL, FILE_END);
+            DWORD number_of_bytes_written;
+            WriteFile(file_handle, b.data, b.offset, &number_of_bytes_written, NULL);
+         }
+      }
+      //-----------------------------------------------
 
       void CreateFolder(const char* path) {
          CreateDirectoryA(path, NULL);

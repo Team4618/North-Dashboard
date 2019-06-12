@@ -245,29 +245,14 @@ void opengl_debug_callback(GLenum source, GLenum type, GLuint id, GLenum severit
 
 struct openglContext {
    HDC dc;
-   
-   struct {
-      GLuint handle;
-      GLint matrix_uniform;
-      GLint colour_uniform;
-   } col;
-   
-   struct {
-      GLuint handle;
-      GLint matrix_uniform; 
-      GLint texture_uniform;
-      GLint colour_uniform;
-   } tex;
-   
-   struct {
-      GLuint handle;
-      GLint matrix_uniform;
-      GLint colour_uniform;
-      GLint width_uniform;
-      GLint feather_uniform;
-   } line;
-   
-   GLuint buffers[4];
+
+   GLuint vertex_buffer;
+
+   GLuint shader;
+   GLint matrix_uniform; 
+   GLint texture_uniform;
+
+   GLuint white_tex;
 };
 
 struct ui_impl_win32_window {
@@ -311,6 +296,12 @@ LRESULT CALLBACK impl_WindowMessageEvent(HWND window, UINT message, WPARAM wPara
 }
 
 //TODO: cleanup all this opengl stuff once the actual apps are done
+
+struct VertexData {
+   v2 pos;
+   v2 uv;
+   v4 colour;
+};
 
 ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_WindowMessageEvent) {
    HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -438,47 +429,31 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
       // wglSwapIntervalEXT(1);
    }
 
-   GLuint transformVert = loadShader("ui_shaders/transform.vert", GL_VERTEX_SHADER);
-   GLuint transformWithUVVert = loadShader("ui_shaders/transform_UV.vert", GL_VERTEX_SHADER);
-   GLuint colourFragment = loadShader("ui_shaders/colour.frag", GL_FRAGMENT_SHADER);
-   GLuint textureFragment = loadShader("ui_shaders/texture.frag", GL_FRAGMENT_SHADER);
-   
-   gl.col.handle = shaderProgram(transformVert, colourFragment);
-   gl.col.matrix_uniform = glGetUniformLocation(gl.col.handle, "Matrix");
-   gl.col.colour_uniform = glGetUniformLocation(gl.col.handle, "Colour");
-   
-   gl.tex.handle = shaderProgram(transformWithUVVert, textureFragment);
-   gl.tex.matrix_uniform = glGetUniformLocation(gl.tex.handle, "Matrix");
-   gl.tex.texture_uniform = glGetUniformLocation(gl.tex.handle, "Texture");
-   gl.tex.colour_uniform = glGetUniformLocation(gl.tex.handle, "Colour");
-   
-   GLuint lineVert = loadShader("ui_shaders/line.vert", GL_VERTEX_SHADER);
-   GLuint lineFrag = loadShader("ui_shaders/line.frag", GL_FRAGMENT_SHADER);
+   //---------------------------
+   GLuint ui_vert = loadShader("ui_shaders/ui.vert", GL_VERTEX_SHADER);
+   GLuint ui_frag = loadShader("ui_shaders/ui.frag", GL_FRAGMENT_SHADER);
+   gl.shader = shaderProgram(ui_vert, ui_frag);
+   gl.matrix_uniform = glGetUniformLocation(gl.shader, "Matrix");
+   gl.texture_uniform = glGetUniformLocation(gl.shader, "Texture");
+   //---------------------------
 
-   gl.line.handle = shaderProgram(lineVert, lineFrag);
-   gl.line.matrix_uniform = glGetUniformLocation(gl.line.handle, "Matrix");
-   gl.line.colour_uniform = glGetUniformLocation(gl.line.handle, "Colour");
-   gl.line.width_uniform = glGetUniformLocation(gl.line.handle, "Width");
-   gl.line.feather_uniform = glGetUniformLocation(gl.line.handle, "Feather");
-   
+   u32 white_texels[4] = {
+      0xFFFFFFFF, 0xFFFFFFFF,
+      0xFFFFFFFF, 0xFFFFFFFF
+   };
+   gl.white_tex = createTexture(white_texels, 2, 2).handle;
+
    GLuint vao;
    glGenVertexArrays(1, &vao);
    glBindVertexArray(vao);
-   
+
    //---------------------------
-   glGenBuffers(ArraySize(gl.buffers), gl.buffers);
-
-   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[POSITION_SLOT]);
-   glVertexAttribPointer(POSITION_SLOT, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0);
+   glGenBuffers(1, &gl.vertex_buffer);
+   glBindBuffer(GL_ARRAY_BUFFER, gl.vertex_buffer);
    
-   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[UV_SLOT]);
-   glVertexAttribPointer(UV_SLOT, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0);
-   
-   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[COLOUR_SLOT]);
-   glVertexAttribPointer(COLOUR_SLOT, 4, GL_FLOAT, GL_FALSE, 0, (void*) 0);
-
-   glBindBuffer(GL_ARRAY_BUFFER, gl.buffers[NORMAL_SLOT]);
-   glVertexAttribPointer(NORMAL_SLOT, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0);
+   glVertexAttribPointer(POSITION_SLOT, 2, GL_FLOAT, GL_FALSE, sizeof(VertexData), (void*) offsetof(VertexData, pos));
+   glVertexAttribPointer(UV_SLOT, 2, GL_FLOAT, GL_FALSE, sizeof(VertexData), (void*) offsetof(VertexData, uv));
+   glVertexAttribPointer(COLOUR_SLOT, 4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (void*) offsetof(VertexData, colour));
 
    glBindBuffer(GL_ARRAY_BUFFER, 0);
    //---------------------------
@@ -503,184 +478,213 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    return result;
 }
 
-// struct RenderCommandType_GL {
+struct DrawCommand {
+   DrawCommand *next;
 
-// };
+   GLuint texture_handle;
+   rect2 scissor_bounds;
 
-// struct RenderCommand_GL {
+   u32 vertex_offset;
+   u32 vertex_count;
+};
 
-// };
+struct RenderBatch {
+   RenderBatch *next;
 
-void DrawRenderCommandBuffer(RenderCommand *first_command, rect2 bounds, mat4 transform, ui_impl_win32_window *window) {
-   openglContext *gl = &window->gl;
-   glScissor(bounds.min.x, window->size.y - bounds.max.y, Size(bounds).x, Size(bounds).y);
+   VertexData *vertices;
+   u32 vertex_count;
+   u32 vertex_i;
 
+   //TODO: Index buffer
+   // u32 *indices;
+   // u32 index_count;
+
+   DrawCommand *first_cmd;
+   DrawCommand *curr_cmd;
+};
+
+struct RenderContext {
+   MemoryArena *arena;
+
+   RenderBatch *first_batch;
+   RenderBatch *curr_batch;
+
+   GLuint white_tex;
+};
+
+const u32 min_vert_count = 512;
+DrawCommand *GetOrCreateCommand(RenderContext *ctx, GLuint tex_handle, rect2 scissor, u32 vert_count) {
+   MemoryArena *arena = ctx->arena;
+   
+   RenderBatch *batch = ctx->curr_batch;
+   if((batch == NULL) || 
+      ((batch->vertex_count - batch->vertex_i) < vert_count))
+   {
+      batch = PushStruct(arena, RenderBatch);
+      batch->vertex_count = vert_count + min_vert_count; 
+      batch->vertices = PushArray(arena, VertexData, batch->vertex_count);
+
+      if(ctx->first_batch == NULL) {
+         ctx->first_batch = batch;
+      } else {
+         ctx->curr_batch->next = batch;
+      }
+
+      ctx->curr_batch = batch;
+   }
+
+   DrawCommand *cmd = batch->curr_cmd;
+   if((cmd == NULL) ||
+      (cmd->texture_handle != tex_handle) ||
+      (cmd->scissor_bounds != scissor))
+   {
+      cmd = PushStruct(arena, DrawCommand);
+      cmd->texture_handle = tex_handle;
+      cmd->scissor_bounds = scissor;
+      cmd->vertex_offset = batch->vertex_i;
+
+      if(batch->first_cmd == NULL) {
+         batch->first_cmd = cmd;
+      } else {
+         batch->curr_cmd->next = cmd;
+      }
+
+      batch->curr_cmd = cmd;
+   }
+
+   return cmd;
+}
+
+void BatchRenderCommandBuffer(RenderContext *ctx, RenderCommand *first_command, rect2 scissor) {
    for(RenderCommand *command = first_command; command; command = command->next) {
       switch(command->type) {
          case RenderCommand_Texture: {
-            glUseProgram(gl->tex.handle);
-            glUniformMatrix4fv(gl->tex.matrix_uniform, 1, GL_FALSE, transform.e);
-            glUniform4fv(gl->tex.colour_uniform, 1, command->drawTexture.colour.e);
-            
-            glUniform1i(gl->tex.texture_uniform, 0);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, command->drawTexture.tex.handle);
-            
-            glEnableVertexAttribArray(POSITION_SLOT);
-            glEnableVertexAttribArray(UV_SLOT);
-            glDisableVertexAttribArray(COLOUR_SLOT);
-            glDisableVertexAttribArray(NORMAL_SLOT);
-            
+            DrawCommand *cmd = GetOrCreateCommand(ctx, command->drawTexture.tex.handle, scissor, 6);
+            RenderBatch *batch = ctx->curr_batch;
+
             rect2 bounds = command->drawTexture.bounds;
-            v2 verts[6] = {
-               bounds.min, bounds.min + YOf(Size(bounds)), bounds.max, 
-               bounds.min, bounds.min + XOf(Size(bounds)), bounds.max
-            };
-            
             rect2 uvBounds = command->drawTexture.uvBounds;
-            v2 uvs[6] = {
-               uvBounds.min, uvBounds.min + YOf(Size(uvBounds)), uvBounds.max, 
-               uvBounds.min, uvBounds.min + XOf(Size(uvBounds)), uvBounds.max
-            };
+            v2 texsize = command->drawTexture.tex.size;
             
-            for(u32 i = 0; i < 6; i++)
-               uvs[i] = uvs[i] / command->drawTexture.tex.size;
+            VertexData v1 = {bounds.min,                     uvBounds.min / texsize,                         command->drawTexture.colour};
+            VertexData v2 = {bounds.min + YOf(Size(bounds)), (uvBounds.min + YOf(Size(uvBounds))) / texsize, command->drawTexture.colour};
+            VertexData v3 = {bounds.max,                     uvBounds.max / texsize,                         command->drawTexture.colour};
+            VertexData v4 = {bounds.min + XOf(Size(bounds)), (uvBounds.min + XOf(Size(uvBounds))) / texsize, command->drawTexture.colour};
+            
+            //write to batch->vertices
+            batch->vertices[batch->vertex_i++] = v1;
+            batch->vertices[batch->vertex_i++] = v2;
+            batch->vertices[batch->vertex_i++] = v3;
 
-            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[POSITION_SLOT]);
-            glBufferData(GL_ARRAY_BUFFER, 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
+            batch->vertices[batch->vertex_i++] = v1;
+            batch->vertices[batch->vertex_i++] = v4;
+            batch->vertices[batch->vertex_i++] = v3;
 
-            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[UV_SLOT]);
-            glBufferData(GL_ARRAY_BUFFER, 2 * 3 * sizeof(v2), uvs, GL_STREAM_DRAW);
-
-            glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
+            cmd->vertex_count += 6;
          } break;
          
          case RenderCommand_Rectangle: {
-            glUseProgram(gl->col.handle);
-            glUniformMatrix4fv(gl->col.matrix_uniform, 1, GL_FALSE, transform.e);
-            glUniform4fv(gl->col.colour_uniform, 1, command->drawRectangle.colour.e);
-            
-            glEnableVertexAttribArray(POSITION_SLOT);
-            glDisableVertexAttribArray(UV_SLOT);
-            glDisableVertexAttribArray(COLOUR_SLOT);
-            glDisableVertexAttribArray(NORMAL_SLOT);
-            
+            DrawCommand *cmd = GetOrCreateCommand(ctx, ctx->white_tex, scissor, 6);
+            RenderBatch *batch = ctx->curr_batch;
+
             rect2 bounds = command->drawRectangle.bounds;
             v2 verts[6] = {
                bounds.min, bounds.min + YOf(Size(bounds)), bounds.max, 
                bounds.min, bounds.min + XOf(Size(bounds)), bounds.max
             };
             
-            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[POSITION_SLOT]);
-            glBufferData(GL_ARRAY_BUFFER, 2 * 3 * sizeof(v2), verts, GL_STREAM_DRAW);
+            VertexData v1 = { bounds.min,                     V2(0, 0), command->drawRectangle.colour };
+            VertexData v2 = { bounds.min + YOf(Size(bounds)), V2(0, 1), command->drawRectangle.colour };
+            VertexData v3 = { bounds.max,                     V2(1, 1), command->drawRectangle.colour };
+            VertexData v4 = { bounds.min + XOf(Size(bounds)), V2(1, 0), command->drawRectangle.colour };
+            
+            //write to batch->vertices
+            batch->vertices[batch->vertex_i++] = v1;
+            batch->vertices[batch->vertex_i++] = v2;
+            batch->vertices[batch->vertex_i++] = v3;
 
-            glDrawArrays(GL_TRIANGLES, 0, 2 * 3);
+            batch->vertices[batch->vertex_i++] = v1;
+            batch->vertices[batch->vertex_i++] = v4;
+            batch->vertices[batch->vertex_i++] = v3;
+
+            cmd->vertex_count += 6;
          } break;
          
          case RenderCommand_Line: {
             if(command->drawLine.point_count < 2)
                continue;
 
-            glUseProgram(gl->line.handle);
-            glUniformMatrix4fv(gl->line.matrix_uniform, 1, GL_FALSE, transform.e);
-            glUniform4fv(gl->line.colour_uniform, 1, command->drawLine.colour.e);
-            glUniform1f(gl->line.width_uniform, command->drawLine.thickness);
-            glUniform1f(gl->line.feather_uniform, 2);
-            
-            glEnableVertexAttribArray(POSITION_SLOT);
-            glDisableVertexAttribArray(UV_SLOT);
-            glDisableVertexAttribArray(COLOUR_SLOT);
-            glEnableVertexAttribArray(NORMAL_SLOT);
-            
-            u32 vert_count = (command->drawLine.point_count - (command->drawLine.closed ? 0 : 1)) * 6;
-            v2 *verts = PushTempArray(v2, vert_count);
-            v2 *normals = PushTempArray(v2, vert_count);
+            u32 point_count = command->drawLine.point_count;
+            u32 vert_count = command->drawLine.closed ? 6*point_count : 6*(point_count - 1);
 
-            //TODO: fix line joints & clean this up
-               
-            v2 last_point = command->drawLine.points[0];
-            for(u32 i = 1; i < command->drawLine.point_count; i++) {
-               v2 point = command->drawLine.points[i];
-               v2 line_normal = Normalize(Perp(point - last_point));
-               v2 normal_a = line_normal;
-               v2 normal_b = line_normal;
+            DrawCommand *cmd = GetOrCreateCommand(ctx, ctx->white_tex, scissor, vert_count);
+            RenderBatch *batch = ctx->curr_batch;
 
-               // if(i > 1) {
-               //    v2 prev_line_normal = Normalize(Perp(command->drawLine.points[i - 1] - point));
-               //    normal_a = normal_a + prev_line_normal;
-               // }
+            //TODO: properly join lines instead of doing a rect per point pair
+            for(u32 i = 0; i < (point_count - 1); i++) {
+               v2 a = command->drawLine.points[i];
+               v2 b = command->drawLine.points[i + 1];
+               v2 line_normal = (command->drawLine.thickness / 2) * Normalize(Perp(b - a));
 
-               // if(1 < (command->drawLine.point_count - 1)) {
-               //    v2 next_line_normal = Normalize(Perp(point - command->drawLine.points[i + 1]));
-               //    normal_b = normal_b + next_line_normal;
-               // }
+               VertexData v1 = { a + line_normal, V2(0, 0), command->drawLine.colour };
+               VertexData v2 = { a - line_normal, V2(0, 1), command->drawLine.colour };
+               VertexData v3 = { b - line_normal, V2(1, 1), command->drawLine.colour };
+               VertexData v4 = { b + line_normal, V2(1, 0), command->drawLine.colour };
 
-               v2 *vert = verts + 6 * (i - 1);
-               v2 *normal = normals + 6 * (i - 1);
-               
-               vert[0] = last_point;
-               vert[1] = last_point;
-               vert[2] = point;
-               vert[3] = last_point;
-               vert[4] = point;
-               vert[5] = point;
+               batch->vertices[batch->vertex_i++] = v1;
+               batch->vertices[batch->vertex_i++] = v2;
+               batch->vertices[batch->vertex_i++] = v3;
 
-               normal[0] = normal_a;
-               normal[1] = -normal_a;
-               normal[2] = normal_b;
-               normal[3] = -normal_a;
-               normal[4] = normal_b;
-               normal[5] = -normal_b;
-
-               last_point = point;
+               batch->vertices[batch->vertex_i++] = v1;
+               batch->vertices[batch->vertex_i++] = v4;
+               batch->vertices[batch->vertex_i++] = v3;
             }
 
             if(command->drawLine.closed) {
-               v2 point = command->drawLine.points[0];
-               v2 line_normal = Normalize(Perp(point - last_point));
-               v2 normal_a = line_normal;
-               v2 normal_b = line_normal;
+               v2 a = command->drawLine.points[point_count - 1];
+               v2 b = command->drawLine.points[0];
+               v2 line_normal = (command->drawLine.thickness / 2) * Normalize(Perp(b - a));
 
-               v2 *vert = verts + 6 * (command->drawLine.point_count - 1);
-               v2 *normal = normals + 6 * (command->drawLine.point_count - 1);
-               
-               //TODO: make a "write line" function or something
-               vert[0] = last_point;
-               vert[1] = last_point;
-               vert[2] = point;
-               vert[3] = last_point;
-               vert[4] = point;
-               vert[5] = point;
+               VertexData v1 = { a + line_normal, V2(0, 0), command->drawLine.colour };
+               VertexData v2 = { a - line_normal, V2(0, 1), command->drawLine.colour };
+               VertexData v3 = { b - line_normal, V2(1, 1), command->drawLine.colour };
+               VertexData v4 = { b + line_normal, V2(1, 0), command->drawLine.colour };
 
-               normal[0] = normal_a;
-               normal[1] = -normal_a;
-               normal[2] = normal_b;
-               normal[3] = -normal_a;
-               normal[4] = normal_b;
-               normal[5] = -normal_b;
+               batch->vertices[batch->vertex_i++] = v1;
+               batch->vertices[batch->vertex_i++] = v2;
+               batch->vertices[batch->vertex_i++] = v3;
 
-               last_point = point;
+               batch->vertices[batch->vertex_i++] = v1;
+               batch->vertices[batch->vertex_i++] = v4;
+               batch->vertices[batch->vertex_i++] = v3;
             }
 
-            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[POSITION_SLOT]);
-            glBufferData(GL_ARRAY_BUFFER, vert_count * sizeof(v2), verts, GL_STREAM_DRAW);
-
-            glBindBuffer(GL_ARRAY_BUFFER, gl->buffers[NORMAL_SLOT]);
-            glBufferData(GL_ARRAY_BUFFER, vert_count * sizeof(v2), normals, GL_STREAM_DRAW);
-            
-            glDrawArrays(GL_TRIANGLES, 0, vert_count);
+            cmd->vertex_count += vert_count;
          } break;
       }
    }
 }
 
-void DrawElement(element *e, mat4 transform, ui_impl_win32_window *window) {
-   DrawRenderCommandBuffer(e->first_command, e->cliprect, transform, window);
+void DrawBatch(RenderBatch *batch, ui_impl_win32_window *window) {
+   openglContext *gl = &window->gl;
+   glBindBuffer(GL_ARRAY_BUFFER, gl->vertex_buffer);
+   glBufferData(GL_ARRAY_BUFFER, batch->vertex_i * sizeof(VertexData), batch->vertices, GL_STREAM_DRAW);
+
+   for(DrawCommand *cmd = batch->first_cmd; cmd; cmd = cmd->next) {
+      rect2 bounds = cmd->scissor_bounds;
+      glScissor(bounds.min.x, window->size.y - bounds.max.y, Size(bounds).x, Size(bounds).y);
+      glBindTexture(GL_TEXTURE_2D, cmd->texture_handle);
+      glDrawArrays(GL_TRIANGLES, cmd->vertex_offset, cmd->vertex_count);
+   }
+}
+
+void RunElement(RenderContext *rctx, element *e) {
+   BatchRenderCommandBuffer(rctx, e->first_command, e->cliprect);
    
    uiTick(e);
 
    for(element *child = e->first_child; child; child = child->next) {
-      DrawElement(child, transform, window);
+      RunElement(rctx, child);
    }
 }
 
@@ -1119,19 +1123,39 @@ void endFrame(ui_impl_win32_window *window, element *root, f32 max_fps = 60) {
    context->filedrop_count = 0;
    context->filedrop_names = NULL;
    
+   element *debug_root = DrawDebugView(window, context, input, max_fps);
+
+   //Batch
+   RenderContext rctx = {};
+   rctx.arena = context->frame_arena;
+   rctx.white_tex = window->gl.white_tex;
+
+   RunElement(&rctx, root);
+   BatchRenderCommandBuffer(&rctx, context->overlay->first_command, context->overlay->cliprect);
+   RunElement(&rctx, debug_root);
+
+   //Render
    glScissor(0, 0, window->size.x, window->size.y);
    glClearColor(1, 1, 1, 1);
    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
    mat4 transform = Orthographic(0, window->size.y, 0, window->size.x, 100, -100);
-   DrawElement(root, transform, window);
-   DrawRenderCommandBuffer(context->overlay->first_command, context->overlay->cliprect, transform, window);
-   
-   element *debug_root = DrawDebugView(window, context, input, max_fps);
-   DrawElement(debug_root, transform, window);
+   glUseProgram(window->gl.shader);
+   glUniformMatrix4fv(window->gl.matrix_uniform, 1, GL_FALSE, transform.e);
+   glUniform1i(window->gl.texture_uniform, 0);
+   glActiveTexture(GL_TEXTURE0);
+
+   glEnableVertexAttribArray(POSITION_SLOT);
+   glEnableVertexAttribArray(UV_SLOT);
+   glEnableVertexAttribArray(COLOUR_SLOT);         
+
+   for(RenderBatch *batch = rctx.first_batch; batch; batch = batch->next) {
+      DrawBatch(batch, window);
+   }
 
    SwapBuffers(window->gl.dc);
 
+   //Wait
    if(window->log_frames) {
       fps_array[frame_i] = context->fps;
       frame_time_array[frame_i] = context->dt;

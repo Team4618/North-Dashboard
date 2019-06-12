@@ -24,6 +24,7 @@
 
 #include "lib/ui_impl_win32_opengl.cpp"
 
+#if 0
 SOCKET tcp_socket;
 bool was_connected = false;
 bool tcp_connected = false;
@@ -33,16 +34,25 @@ void SendPacket(buffer packet) {
    s32 sent = send(tcp_socket, (char *)packet.data, packet.offset, 0);
    // OutputDebugStringA(ToCString(Concat(Literal("Sent "), ToString(sent), Literal(" bytes\n"))));
 }
+#endif
+
+#include "north_defs/north_common_definitions.h"
+#include "north_defs/north_file_definitions.h"
+#include "north_defs/north_network_definitions.h"
+
+#include "north_shared/north_networking_win32.cpp"
 
 #include "dashboard.cpp"
 #include "network.cpp"
 
+#if 0
 void CreateSocket() {
    tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
    u_long non_blocking = true;
    ioctlsocket(tcp_socket, FIONBIO, &non_blocking);
 }
 
+u32 sent_packet_count = 0;
 void HandleConnectionStatus(DashboardState *state) {
    if(recv(tcp_socket, NULL, 0, 0) == SOCKET_ERROR) {
       s32 wsa_error = WSAGetLastError();
@@ -53,11 +63,13 @@ void HandleConnectionStatus(DashboardState *state) {
       }
    }
    
-   if((state->curr_time - last_recv_time) > 2) {
+   if((state->curr_time - last_recv_time) > 20 /*2*/) {
       tcp_connected = false;
    }
 
    if(was_connected && !tcp_connected) {
+      sent_packet_count = 0;
+      
       HandleDisconnect(state);
       OutputDebugStringA(ToCString(Literal("Disconnecting, t = ") + ToString(state->curr_time - last_recv_time) + Literal("\n")));
       
@@ -117,6 +129,19 @@ void HandleNetworking(DashboardState *state) {
       } else if(recv_return == sizeof(PacketHeader)) {
          buffer packet = PushTempBuffer(header.size + sizeof(PacketHeader));
          recv_return = recv(tcp_socket, (char *) packet.data, packet.size, MSG_PEEK);
+         
+         //--------------------------
+         if(recv_return == packet.size) {
+            sent_packet_count++;
+         } else {
+            OutputDebugStringA(ToCString(ToString(recv_return) + Literal(" Pending\n")));
+         }
+         OutputDebugStringA(ToCString(Concat(Literal((recv_return == packet.size) ? "Recv" : "Icmp"), ToString((u32)(header.size + sizeof(PacketHeader))), Literal(" ") + ToString(header.type), Literal(" #"), ToString(sent_packet_count), Literal("\n") )));
+         if(header.type > 4) {
+            int test = 12;
+         }
+         //--------------------------
+         
          if(recv_return == packet.size) {
             recv(tcp_socket, (char *) packet.data, packet.size, 0);
             
@@ -133,8 +158,9 @@ void HandleNetworking(DashboardState *state) {
 
    HandleConnectionStatus(state);
 }
+#endif
 
-#include "test_file_writing.cpp"
+// #include "test_file_writing.cpp"
 
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
    //NOTE: 
@@ -171,9 +197,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    WSADATA winsock_data = {};
    WSAStartup(MAKEWORD(2, 2), &winsock_data);
    CreateSocket();
+   // tcp_buffer = Buffer(???);
 
    //NOTE: test code, writes out a bunch of test files
-   WriteTestFiles();
+   // WriteTestFiles();
 
    Timer timer = InitTimer();
    
@@ -188,7 +215,15 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       }
 
       Reset(__temp_arena);
-      HandleNetworking(&state);
+      PacketHeader header = {};
+      buffer packet = {};
+      while(HasPackets(ui_context.curr_time, &header, &packet)) {
+         HandlePacket(&state, (PacketType::type) header.type, packet);
+      }
+
+      if(HandleConnectionStatus((state.settings.team_number == 0) ? "127.0.0.1" : "10.0.5.4", ui_context.curr_time)) {
+         HandleDisconnect(&state);
+      }
 
       Reset(__temp_arena);
       element *root_element = beginFrame(window.size, &ui_context, dt);

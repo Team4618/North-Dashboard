@@ -1,51 +1,64 @@
 //PARSING-NCRR-FILES--------------------------------
-struct DiagnosticsRecording {
-   string name;
-   North_Unit::type unit;
+//NOTE: used for polylines, triangles & points
+struct VertexDataRecording {
+   v2 *points;
+   u32 point_count;
+   
+   v4 colour;
+
+   f32 begin_time;
+   f32 end_time;
+};
+
+struct DiagnosticRecording {
+   string unit;
+   // u32 unit_id; //TODO: generate these
    
    u32 sample_count;
    RobotRecording_DiagnosticSample *samples;
 };
 
 struct MessageRecording {
-   North_MessageType::type type;
    string text;
    f32 begin_time;
    f32 end_time;
 };
 
-struct MarkerRecording {
-   v2 pos;
-   string text;
-   f32 begin_time;
-   f32 end_time;
-};
-
-struct PathRecording {
-   u32 control_point_count;
-   North_HermiteControlPoint *control_points;
-
-   string text;
-   f32 begin_time;
-   f32 end_time;
-};
-
-struct LoadedRecordingGroup {
+struct LoadedRecording {
+   LoadedRecording *next;
+   North_VisType::type type;
    string name;
+
+   bool hidden;
+
+   union {
+      struct {
+         u32 vdata_count;
+         VertexDataRecording *vdata;
+      } vdata;
+
+      struct {
+         u32 sample_count;
+         RobotRecording_RobotStateSample *samples;
+      } pose;
+
+      DiagnosticRecording diag;
+
+      struct {
+         u32 message_count;
+         MessageRecording *messages;
+      } msg;
+   };
+};
+
+struct RecordingNamespace {
+   RecordingNamespace *next;
+   string name;
+
    bool collapsed;
-   MultiLineGraphData graph;
 
-   u32 diagnostic_count;
-   DiagnosticsRecording *diagnostics;
-
-   u32 message_count;
-   MessageRecording *messages;
-
-   u32 marker_count;
-   MarkerRecording *markers;
-
-   u32 path_count;
-   PathRecording *paths;
+   RecordingNamespace *first_child;
+   LoadedRecording *first_recording;
 };
 
 struct LoadedRobotRecording {
@@ -59,74 +72,192 @@ struct LoadedRobotRecording {
    f32 max_time;
    f32 curr_time;
 
-   u32 robot_sample_count;
-   RobotRecording_RobotStateSample *robot_samples;
-
-   LoadedRecordingGroup default_group;
-   u32 group_count;
-   LoadedRecordingGroup *groups;
+   RecordingNamespace root_namespace;
 };
 
-void LoadRecordingGroup(MemoryArena *arena, buffer *file, LoadedRecordingGroup *group) {
-   RobotRecording_Group *header = ConsumeStruct(file, RobotRecording_Group);
-   group->name = PushCopy(arena, ConsumeString(file, header->name_length));
-   group->collapsed = true;
+LoadedRecording *GetOrCreateLoadedRecording(LoadedRobotRecording *state, string name) {
+   MemoryArena *arena = state->arena;
+   SplitString path = split(name, '/');
+   Assert(path.part_count > 0);
 
-   //TODO: make sure this is ok, these graphs shouldnt live longer than the recording arena
-   group->graph = NewMultiLineGraph(PushArena(arena, Megabyte(4)));
+   RecordingNamespace *curr_namespace = &state->root_namespace;
+   for(u32 i = 0; i < path.part_count - 1; i++) {
+      string ns_name = path.parts[i];
+      bool found = false;
+      
+      for(RecordingNamespace *ns = curr_namespace->first_child; ns; ns = ns->next) {
+         if(ns->name == ns_name) {
+            curr_namespace = ns;
+            found = true;
+            break;
+         }
+      }
 
-   group->diagnostic_count = header->diagnostic_count;
-   group->diagnostics = PushArray(arena, DiagnosticsRecording, header->diagnostic_count);
-   group->message_count = header->message_count;
-   group->messages = PushArray(arena, MessageRecording, header->message_count);
-   group->marker_count = header->marker_count;
-   group->markers = PushArray(arena, MarkerRecording, header->marker_count);
-   group->path_count = header->path_count;
-   group->paths = PushArray(arena, PathRecording, header->path_count);
-
-   for(u32 i = 0; i < header->diagnostic_count; i++) {
-      DiagnosticsRecording *diag = group->diagnostics + i;
-      RobotRecording_Diagnostic *diag_header = ConsumeStruct(file, RobotRecording_Diagnostic);
-      diag->name = PushCopy(arena, ConsumeString(file, diag_header->name_length));
-      diag->unit = (North_Unit::type) diag_header->unit;
-      diag->sample_count = diag_header->sample_count;
-      diag->samples = ConsumeAndCopyArray(arena, file, RobotRecording_DiagnosticSample, diag->sample_count);
-
-      for(u32 i = 0; i < diag->sample_count; i++) {
-         RobotRecording_DiagnosticSample sample = diag->samples[i];
-         AddEntry(&group->graph, diag->name, sample.value, sample.time, diag->unit);
+      if(!found) {
+         RecordingNamespace *new_ns = PushStruct(arena, RecordingNamespace);
+         new_ns->name = PushCopy(arena, ns_name);
+         new_ns->next = curr_namespace->first_child;
+         curr_namespace->first_child = new_ns;
+         
+         curr_namespace = new_ns;
       }
    }
 
-   for(u32 i = 0; i < header->message_count; i++) {
-      MessageRecording *msg = group->messages + i;
-      RobotRecording_Message *msg_header = ConsumeStruct(file, RobotRecording_Message);
-      
-      msg->begin_time = msg_header->begin_time;
-      msg->end_time = msg_header->end_time;
-      msg->type = (North_MessageType::type) msg_header->type;
-      msg->text = PushCopy(arena, ConsumeString(file, msg_header->length));
+   LoadedRecording *result = NULL;
+   string rec_name = path.parts[path.part_count - 1];
+   for(LoadedRecording *rec = curr_namespace->first_recording; rec; rec = rec->next) {
+      if(rec->name == rec_name) {
+         result = rec;
+         break;
+      }
    }
 
-   for(u32 i = 0; i < header->marker_count; i++) {
-      MarkerRecording *msg = group->markers + i;
-      RobotRecording_Marker *msg_header = ConsumeStruct(file, RobotRecording_Marker);
-      
-      msg->begin_time = msg_header->begin_time;
-      msg->end_time = msg_header->end_time;
-      msg->pos = msg_header->pos;
-      msg->text = PushCopy(arena, ConsumeString(file, msg_header->length));
+   if(result == NULL) {
+      result = PushStruct(arena, LoadedRecording);
+      result->name = PushCopy(arena, rec_name);
+      result->next = curr_namespace->first_recording;
+      curr_namespace->first_recording = result;
    }
 
-   for(u32 i = 0; i < header->path_count; i++) {
-      PathRecording *msg = group->paths + i;
-      RobotRecording_Path *msg_header = ConsumeStruct(file, RobotRecording_Path);
-      
-      msg->begin_time = msg_header->begin_time;
-      msg->end_time = msg_header->end_time;
-      msg->text = PushCopy(arena, ConsumeString(file, msg_header->length));
-      msg->control_point_count = msg_header->control_point_count;
-      msg->control_points = ConsumeAndCopyArray(arena, file, North_HermiteControlPoint, msg->control_point_count);
+   return result;
+}
+
+//-------------------------PARSERS-------------------------
+void parseVertexData(LoadedRobotRecording *state, LoadedRecording *recording, buffer *file, bool counting) {
+   RobotRecording_VertexData *vdata = ConsumeStruct(file, RobotRecording_VertexData);
+   v2 *points = ConsumeArray(file, v2, vdata->point_count);
+
+   if(counting) {
+      recording->vdata.vdata_count++;
+   } else {
+      MemoryArena *arena = state->arena;
+      if(recording->vdata.vdata == NULL) {
+         recording->vdata.vdata = PushArray(arena, VertexDataRecording, recording->vdata.vdata_count);
+         recording->vdata.vdata_count = 0;
+      }
+
+      VertexDataRecording *vdata_rec = recording->vdata.vdata + recording->vdata.vdata_count++;
+      vdata_rec->point_count = vdata->point_count;
+      vdata_rec->points = PushArrayCopy(arena, v2, points, vdata->point_count);
+      vdata_rec->colour = vdata->colour;
+      vdata_rec->begin_time = vdata->begin_time;
+      vdata_rec->end_time = vdata->end_time;
+
+      state->min_time = Min(state->min_time, vdata->begin_time);
+      state->max_time = Max(state->max_time, vdata->end_time);
+   }
+}
+
+void parseRobotPose(LoadedRobotRecording *state, LoadedRecording *recording, buffer *file, bool counting) {
+   RobotRecording_RobotPose *pose_data = ConsumeStruct(file, RobotRecording_RobotPose);
+   RobotRecording_RobotStateSample *samples = ConsumeArray(file, RobotRecording_RobotStateSample, pose_data->sample_count);
+
+   if(counting) {
+      recording->pose.sample_count += pose_data->sample_count;
+   } else {
+      MemoryArena *arena = state->arena;
+      if(recording->pose.samples == NULL) {
+         recording->pose.samples = PushArray(arena, RobotRecording_RobotStateSample, recording->pose.sample_count);
+         recording->pose.sample_count = 0;
+      }
+
+      Copy(samples, pose_data->sample_count * sizeof(RobotRecording_RobotStateSample), 
+           recording->pose.samples + recording->pose.sample_count);
+
+      recording->pose.sample_count += pose_data->sample_count;
+
+      for(u32 i = 0; i < pose_data->sample_count; i++) {
+         state->min_time = Min(state->min_time, samples[i].time);
+         state->max_time = Max(state->max_time, samples[i].time);
+      }
+   }
+}
+
+void parseDiagnostic(LoadedRobotRecording *state, LoadedRecording *recording, buffer *file, bool counting) {
+   RobotRecording_Diagnostic *diag_data = ConsumeStruct(file, RobotRecording_Diagnostic);
+   string unit_name = ConsumeString(file, diag_data->unit_length);
+   RobotRecording_DiagnosticSample *samples = ConsumeArray(file, RobotRecording_DiagnosticSample, diag_data->sample_count);
+
+   if(counting) {
+      recording->diag.sample_count += diag_data->sample_count;
+   } else {
+      MemoryArena *arena = state->arena;
+      if(recording->diag.samples == NULL) {
+         recording->diag.unit = PushCopy(arena, unit_name);
+         recording->diag.samples = PushArray(arena, RobotRecording_DiagnosticSample, recording->diag.sample_count);
+         recording->diag.sample_count = 0;
+      }
+
+      Copy(samples, diag_data->sample_count * sizeof(RobotRecording_DiagnosticSample), 
+           recording->diag.samples + recording->diag.sample_count);
+
+      recording->diag.sample_count += diag_data->sample_count;
+
+      for(u32 i = 0; i < diag_data->sample_count; i++) {
+         state->min_time = Min(state->min_time, samples[i].time);
+         state->max_time = Max(state->max_time, samples[i].time);
+      }
+   }
+}
+
+void parseMessage(LoadedRobotRecording *state, LoadedRecording *recording, buffer *file, bool counting) {
+   RobotRecording_Message *msg = ConsumeStruct(file, RobotRecording_Message);
+   string text = ConsumeString(file, msg->text_length);
+
+   if(counting) {
+      recording->msg.message_count++;
+   } else {
+      MemoryArena *arena = state->arena;
+      if(recording->msg.messages == NULL) {
+         recording->msg.messages = PushArray(arena, MessageRecording, recording->msg.message_count);
+         recording->msg.message_count = 0;
+      }
+
+      MessageRecording *msg_rec = recording->msg.messages + recording->msg.message_count++;
+      msg_rec->text = PushCopy(arena, text);
+      msg_rec->begin_time = msg->begin_time;
+      msg_rec->end_time = msg->end_time;
+
+      state->min_time = Min(state->min_time, msg->begin_time);
+      state->max_time = Max(state->max_time, msg->end_time);
+   }
+}
+//---------------------------------------------------------
+
+typedef void (*entry_parser_callback)(LoadedRobotRecording *state, LoadedRecording *recording, buffer *file, bool count);
+entry_parser_callback entry_parsers[North_VisType::TypeCount] = {
+   NULL, //Invalid 0
+   parseVertexData, //Polyline = 1
+   parseVertexData, //Triangles = 2
+   parseVertexData, //Points = 3
+   parseRobotPose, //RobotPose = 4
+   parseDiagnostic, //Diagnostic = 5
+   parseMessage, //Message = 6
+};
+
+bool hasEntryParser(u8 type) {
+   return (type < North_VisType::TypeCount) && (entry_parsers[type] != NULL);
+}
+
+void LoadChunk(LoadedRobotRecording *state, buffer *file, bool count) {
+   MemoryArena *arena = state->arena;
+   RobotRecording_Chunk *chunk = ConsumeStruct(file, RobotRecording_Chunk);
+
+   for(u32 i = 0; i < chunk->entry_count; i++) {
+      RobotRecording_Entry *entry = ConsumeStruct(file, RobotRecording_Entry);
+      string name = ConsumeString(file, entry->name_length);
+
+      if(hasEntryParser(entry->type)) {
+         LoadedRecording *recording = GetOrCreateLoadedRecording(state, name);
+         recording->type = (North_VisType::type) entry->type;
+         
+         for(u32 j = 0; j < entry->recording_count; j++) {
+            entry_parsers[entry->type](state, recording, file, count);
+         }
+      } else {
+         //TODO: report unknown entry type?
+         ConsumeSize(file, entry->size);
+      }
    }
 }
 
@@ -134,6 +265,9 @@ void LoadRecording(LoadedRobotRecording *state, string file_name) {
    MemoryArena *arena = state->arena;
    
    Reset(arena);
+   ZeroStruct(&state->root_namespace);
+   state->robot_name = {};
+
    buffer file = ReadEntireFile(Concat(file_name, Literal(".ncrr")));
    state->loaded = (file.data != NULL);
    if(file.data != NULL) {
@@ -145,543 +279,381 @@ void LoadRecording(LoadedRobotRecording *state, string file_name) {
          RobotRecording_FileHeader *header = ConsumeStruct(&file, RobotRecording_FileHeader);
          
          state->timestamp = header->timestamp;
-         state->robot_name = PushCopy(arena,
-            ConsumeString(&file, header->robot_name_length));
-         state->group_count = header->group_count;
-         state->groups = PushArray(arena, LoadedRecordingGroup, header->group_count);
-
-         RobotRecording_RobotStateSample *robot_samples =
-            ConsumeArray(&file, RobotRecording_RobotStateSample, header->robot_state_sample_count);
+         state->robot_name = ConsumeAndCopyString(&file, header->robot_name_length, arena);
+         state->min_time = F32_MAX;
+         state->max_time = -F32_MAX;
          
-         if(header->robot_state_sample_count > 0) {
-            state->robot_sample_count = header->robot_state_sample_count;
-            state->robot_samples = (RobotRecording_RobotStateSample *) PushCopy(arena, robot_samples,
-                                             header->robot_state_sample_count * sizeof(RobotRecording_RobotStateSample));
-         
-            state->min_time = F32_MAX;
-            state->max_time = -F32_MAX;
-            
-            for(u32 i = 0; i < header->robot_state_sample_count; i++) {
-               RobotRecording_RobotStateSample *sample = robot_samples + i;
-               state->min_time = Min(state->min_time, sample->time);
-               state->max_time = Max(state->max_time, sample->time);
-            }
-
-            state->curr_time = state->min_time;
+         //This will count the data
+         buffer count_file = file;
+         for(u32 i = 0; i < header->chunk_count; i++) {
+            LoadChunk(state, &count_file, true);
          }
 
-         LoadRecordingGroup(arena, &file, &state->default_group);
-         for(u32 i = 0; i < state->group_count; i++) {
-            LoadRecordingGroup(arena, &file, state->groups + i);
+         //This will allocate and load the data
+         for(u32 i = 0; i < header->chunk_count; i++) {
+            LoadChunk(state, &file, false);
          }
+
+         state->curr_time = state->min_time;
       }
    }
 }
 
 //RECORDING-------------------------------------
-struct RobotStateSampleBlock {
-   RobotStateSampleBlock *next;
-   RobotRecording_RobotStateSample samples[1024];
-   u32 count;
-};
+struct RecorderVertexData {
+   RecorderVertexData *next;
 
-struct RecorderDiagnosticSampleBlock {
-   RecorderDiagnosticSampleBlock *next;
-   RobotRecording_DiagnosticSample samples[128];
-   u32 count;
-};
-
-struct RecorderDiagnostic {
-   RecorderDiagnostic *next_in_list;
-   RecorderDiagnostic *next_in_hash;
+   v2 *points;
+   u32 point_count;
    
-   string name;
-   North_Unit::type unit;
-
-   u32 diagnostic_sample_count;
-   RecorderDiagnosticSampleBlock first_sample_block;
-   RecorderDiagnosticSampleBlock *curr_sample_block;
-};
-
-enum MessagelikeType {
-   Messagelike_Message,
-   Messagelike_Marker,
-   Messagelike_Path
-};
-
-struct RecorderMessagelike {
-   RecorderMessagelike *next;
-   bool updated;
+   v4 colour;
 
    f32 begin_time;
    f32 end_time;
+};
+
+struct RecorderPoses {
+   RecorderPoses *next;
+
+   u32 sample_count;
+   RobotRecording_RobotStateSample samples[1024];
+};
+
+struct RecorderDiagnostic {
+   RecorderDiagnostic *next;
+   
+   string unit;
+
+   u32 sample_count;
+   RobotRecording_DiagnosticSample samples[1024];
+};
+
+struct RecorderMessage {
+   RecorderMessage *next;
+
    string text;
+   f32 begin_time;
+   f32 end_time;
+};
 
-   MessagelikeType type;
+struct RecorderEntry {
+   RecorderEntry *next;
+   North_VisType::type type;
+   string name;
+   bool time_based; 
 
+   bool accessed;
+   bool ended_recording;
+   
    union {
-      struct {
-         North_MessageType::type type;
-      } message;
-
-      struct {
-         v2 pos;
-      } marker;
-
-      struct {
-         u32 control_point_count;
-         North_HermiteControlPoint *control_points;
-      } path;
+      RecorderVertexData *curr_vdata;
+      RecorderDiagnostic *curr_diag;
+      RecorderPoses *curr_poses;
+      RecorderMessage *curr_msg;
    };
 };
 
-struct RecorderCompleteList {
-   RecorderMessagelike *active;
-   
-   u32 complete_count;
-   RecorderMessagelike *complete;
-};
-
-struct RobotRecorder;
-struct RecorderGroup {
-   RobotRecorder *state;
-   RecorderGroup *next_in_list;
-   RecorderGroup *next_in_hash;
-
-   string name;
-
-   u32 diagnostic_count;
-   RecorderDiagnostic *first_diagnostic;
-   RecorderDiagnostic *diagnostic_hash[64];
-
-   RecorderCompleteList messages;
-   RecorderCompleteList markers;
-   RecorderCompleteList paths;
-};
-
 struct RobotRecorder {
-   MemoryArena *arena; //NOTE: owned by RobotRecorder 
+   //TODO: replace entry_arena with a freelist of entries (what do we do about the name strings?)
+   // MemoryArena *entry_arena;
+   // MemoryArena *recording_arena; 
+   
+   MemoryArena *arena;
    bool recording;
-   f32 latest_time;
+   u64 latest_frame;
 
-   u32 sample_count;
-   RobotStateSampleBlock first_sample_block;
-   RobotStateSampleBlock *curr_sample_block;
+   RecorderEntry *first_entry;
 
-   u32 group_count;
-   RecorderGroup default_group;
-   RecorderGroup *first_group;
-   RecorderGroup *group_hash[64];
+   u64 curr_file;
+   RobotRecording_FileHeader curr_header;
 };
 
-//TODO: abstract out this hash & list stuff so theres less copy-pasta
-//TODO: same for the block list stuff
-//spent a few hours trying to come up with a good solution, we'll come back to this later 
-
-RecorderGroup *GetOrCreateRecorderGroup(RobotRecorder *state, string name) {
-   if(name.length == 0)
-      return &state->default_group;
-   
-   MemoryArena *arena = state->arena;
-
-   u32 hash = Hash(name) % ArraySize(state->group_hash);
-   RecorderGroup *result = NULL;
-   for(RecorderGroup *curr = state->group_hash[hash]; curr; curr = curr->next_in_hash) {
-      if(curr->name == name) {
-         result = curr;
-      }
+//TODO: accelerate this function with a hash table (instead of a list search)
+RecorderEntry *GetOrCreateEntry(RobotRecorder *state, string name, North_VisType::type type, bool time_based) {
+   RecorderEntry *result = NULL;
+   for(RecorderEntry *entry = state->first_entry; entry; entry = entry->next) {
+      if(entry->name == name)
+         result = entry;
    }
 
    if(result == NULL) {
-      auto *new_group = PushStruct(arena, RecorderGroup);
-      new_group->name = PushCopy(arena, name);
-      new_group->state = state;
+      MemoryArena *arena = state->arena;
+      result = PushStruct(arena, RecorderEntry);
+      result->name = PushCopy(arena, name);
+      result->type = type;
+      result->time_based = time_based;
 
-      new_group->next_in_hash = state->group_hash[hash];
-      new_group->next_in_list = state->first_group;
-
-      state->group_count++;
-      state->group_hash[hash] = new_group;
-      state->first_group = new_group;
-      result = new_group;
+      result->next = state->first_entry;
+      state->first_entry = result;
    }
 
-   //idea
-   /*
-   GetOrCreate(RecorderSubsystem, name, new_subsystem, {
-      new_subsystem->name = PushCopy(arena, name);
-   })
-   */
-
+   result->accessed = true;
    return result;
 }
 
-void AddDiagnosticSample(RecorderGroup *group, 
-                         string name, North_Unit::type unit,
-                         f32 value, f32 time) 
-{
-   MemoryArena *arena = group->state->arena;
-   
-   u32 hash = Hash(name) % ArraySize(group->diagnostic_hash);
-   RecorderDiagnostic *line = NULL;
-   for(RecorderDiagnostic *curr = group->diagnostic_hash[hash]; curr; curr = curr->next_in_hash) {
-      if(curr->name == name) {
-         line = curr;
-      }
-   }
+//---------------------------------------------------
+u32 WriteVertexData(buffer *chunk, RecorderEntry *entry) {
+   Assert((entry->type == North_VisType::Polyline) ||
+          (entry->type == North_VisType::Triangles) ||
+          (entry->type == North_VisType::Points));
 
-   if(line == NULL) {
-      RecorderDiagnostic *new_line = PushStruct(arena, RecorderDiagnostic);
-      new_line->name = PushCopy(arena, name);
-      new_line->unit = unit;
-
-      new_line->next_in_hash = group->diagnostic_hash[hash];
-      new_line->next_in_list = group->first_diagnostic;
-      new_line->curr_sample_block = &new_line->first_sample_block;
-
-      group->diagnostic_hash[hash] = new_line;
-      group->first_diagnostic = new_line;
-      group->diagnostic_count++;
-      line = new_line;
-   }
-   
-   if(line->curr_sample_block->count >= ArraySize(line->curr_sample_block->samples)) {
-      RecorderDiagnosticSampleBlock *new_sample_block = PushStruct(arena, RecorderDiagnosticSampleBlock);
-
-      line->curr_sample_block->next = new_sample_block;
-      line->curr_sample_block = new_sample_block;
-   }
-   line->curr_sample_block->samples[line->curr_sample_block->count++] = { value, time };
-   line->diagnostic_sample_count++;
-}
-
-bool Equal(RecorderMessagelike *msg, RecorderMessagelike *data) {
-   if(msg->text != data->text)
-      return false;
-   
-   switch(msg->type) {
-      case Messagelike_Message: {
-         return (msg->message.type == data->message.type);   
-      } break;
+   //TODO: this writes these in reverse chronological order
+   u32 recording_count = 0;
+   for(RecorderVertexData *vdata = entry->curr_vdata; vdata; vdata = vdata->next) {
+      RobotRecording_VertexData file_vdata = {};
+      file_vdata.point_count = vdata->point_count;
+      file_vdata.colour = vdata->colour;
+      file_vdata.begin_time = vdata->begin_time;
+      file_vdata.end_time = vdata->end_time;
+      WriteStruct(chunk, &file_vdata);
+      WriteArray(chunk, vdata->points, vdata->point_count);
       
-      case Messagelike_Marker: {
-         //TODO: this form of msg->pos == pos is both slow and ugly, fix
-         return (Length(msg->marker.pos - data->marker.pos) < 0.0001);   
-      } break;
-
-      case Messagelike_Path: {
-         if(msg->path.control_point_count == data->path.control_point_count) {
-            for(u32 i = 0; i < msg->path.control_point_count; i++) {
-               North_HermiteControlPoint a = msg->path.control_points[i];
-               North_HermiteControlPoint b = data->path.control_points[i];
-
-               if((Length(a.pos - b.pos) > 0.0001) ||
-                  (Length(a.tangent - b.tangent) > 0.0001))
-               {
-                  return false;
-               }
-            }
-
-            return true;
-         } else {
-            return false;
-         }
-      } break;
+      recording_count++;
    }
-   
-   Assert(false);
-   return false;
+
+   entry->curr_vdata = NULL;
+   return recording_count;
 }
 
-void AddOrUpdate(MemoryArena *arena, RecorderCompleteList *list,
-                 f32 time, MessagelikeType type,
-                 RecorderMessagelike *data)
-{
-   for(RecorderMessagelike *curr = list->active; curr; curr = curr->next) {
-      if(Equal(curr, data)) {
-         curr->updated = true;
-         return;
-      }
-   }
+u32 WriteRobotPose(buffer *chunk, RecorderEntry *entry) {
+   Assert(entry->type == North_VisType::RobotPose);
 
-   RecorderMessagelike *new_message = PushStruct(arena, RecorderMessagelike);
-   new_message->text = PushCopy(arena, data->text);
-   new_message->begin_time = time;
-   new_message->type = type;
-   
-   switch(type) {
-      case Messagelike_Message: {
-         new_message->message.type = data->message.type;
-      } break;
+   //TODO: this writes these in reverse chronological order
+   u32 recording_count = 0;
+   for(RecorderPoses *poses = entry->curr_poses; poses; poses = poses->next) {
+      RobotRecording_RobotPose file_poses = {};
+      file_poses.sample_count = poses->sample_count;
+      WriteStruct(chunk, &file_poses);
+      WriteArray(chunk, poses->samples, poses->sample_count);
       
-      case Messagelike_Marker: {
-         new_message->marker.pos = data->marker.pos;
-      } break;
-
-      case Messagelike_Path: {
-         new_message->path.control_point_count = data->path.control_point_count;
-         new_message->path.control_points = PushArrayCopy(arena, North_HermiteControlPoint, data->path.control_points, data->path.control_point_count);
-      } break;
+      recording_count++;
    }
 
-   new_message->next = list->active;
-   new_message->updated = true;
-   list->active = new_message;
+   entry->curr_poses = NULL;
+   return recording_count;
 }
 
-void AddOrUpdateMessage(RecorderGroup *group, f32 time, string text, North_MessageType::type type) {
-   RecorderMessagelike data = {};
-   data.text = text;
-   data.message.type = type;
-   
-   AddOrUpdate(group->state->arena, &group->messages, 
-               time, Messagelike_Message, &data);
-} 
+u32 WriteDiagnostics(buffer *chunk, RecorderEntry *entry) {
+   Assert(entry->type == North_VisType::Diagnostic);
 
-void AddOrUpdateMarker(RecorderGroup *group, f32 time, string text, v2 pos) {
-   RecorderMessagelike data = {};
-   data.text = text;
-   data.marker.pos = pos;
-   
-   AddOrUpdate(group->state->arena, &group->markers, 
-               time, Messagelike_Marker, &data);
-} 
-
-void AddOrUpdatePath(RecorderGroup *group, f32 time, string text, 
-                     u32 control_point_count,
-                     North_HermiteControlPoint *control_points)
-{
-   RecorderMessagelike data = {};
-   data.text = text;
-   data.path.control_point_count = control_point_count;
-   data.path.control_points = control_points;
-   
-   AddOrUpdate(group->state->arena, &group->paths, 
-               time, Messagelike_Path, &data);
-}
-
-void BeginUpdates(RecorderCompleteList *list) {
-   for(RecorderMessagelike *curr = list->active; 
-       curr; curr = curr->next) 
-   {
-      curr->updated = false;
-   }
-}
-
-//TODO: step through this in the debugger, not 100% sure its correct
-void CheckForComplete(RecorderCompleteList *list, f32 time) {
-   RecorderMessagelike *next = list->active;
-   RecorderMessagelike *prev = NULL;
-
-   while(next) {
-      RecorderMessagelike *curr = next;
-      next = curr->next;
-
-      if(!curr->updated) {
-         curr->end_time = time;
-         
-         list->complete_count++;
-         curr->next = list->complete;
-         list->complete = curr;
-
-         if(prev != NULL)
-            prev->next = next;
-      } else {
-         prev = curr;
-      }
-   }
-}
-
-void CompleteAll(RecorderCompleteList *list, f32 time) {
-   BeginUpdates(list);
-   CheckForComplete(list, time);
-}
-
-void BeginRecording(RobotRecorder *state /*, string name*/) {
-   Assert(!state->recording);
-   state->recording = true;
-
-   Reset(state->arena);
-   state->first_group = NULL;
-   state->group_count = 0;
-
-   _Zero((u8 *) state->group_hash, sizeof(state->group_hash));
-   ZeroStruct(&state->default_group);
-   state->default_group.state = state;
-
-   ZeroStruct(&state->first_sample_block);
-   state->curr_sample_block = &state->first_sample_block;
-   state->sample_count = 0;
-}
-
-//WRITING-NCRR-FILES----------------------------------
-void WriteGroup(buffer *file, RecorderGroup *group) {
-   CompleteAll(&group->messages, group->state->latest_time);
-   CompleteAll(&group->markers, group->state->latest_time);
-   CompleteAll(&group->paths, group->state->latest_time);
-   
-   RobotRecording_Group group_header = {};
-   group_header.name_length = group->name.length;
-   group_header.diagnostic_count = group->diagnostic_count;
-   group_header.message_count = group->messages.complete_count;
-   group_header.marker_count = group->markers.complete_count;
-   group_header.path_count = group->paths.complete_count;
-   WriteStruct(file, &group_header);
-   WriteString(file, group->name);
-
-   for(RecorderDiagnostic *diag = group->first_diagnostic;
-       diag; diag = diag->next_in_list)
-   {
-      RobotRecording_Diagnostic diag_header = {};
-      diag_header.name_length = diag->name.length;
-      diag_header.unit = (u8) diag->unit;
-      diag_header.sample_count = diag->diagnostic_sample_count;
-      WriteStruct(file, &diag_header);
-      WriteString(file, diag->name);
-
-      for(RecorderDiagnosticSampleBlock *block = &diag->first_sample_block;
-          block; block = block->next)
-      {
-         WriteArray(file, block->samples, block->count);
-      }
+   //TODO: this writes these in reverse chronological order
+   u32 recording_count = 0;
+   for(RecorderDiagnostic *diags = entry->curr_diag; diags; diags = diags->next) {
+      RobotRecording_Diagnostic file_diags = {};
+      file_diags.unit_length = diags->unit.length;
+      file_diags.sample_count = diags->sample_count;
+      WriteStruct(chunk, &file_diags);
+      WriteString(chunk, diags->unit);
+      WriteArray(chunk, diags->samples, diags->sample_count);
+      
+      recording_count++;
    }
 
-   for(RecorderMessagelike *msg = group->messages.complete;
-       msg; msg = msg->next)
-   {
-      Assert(msg->type == Messagelike_Message);
-
-      RobotRecording_Message message = {};
-      message.length = (u16) msg->text.length;
-      message.type = (u8) msg->message.type;
-      message.begin_time = msg->begin_time;
-      message.end_time = msg->end_time;
-      WriteStruct(file, &message);
-      WriteString(file, msg->text);
-   }
-
-   for(RecorderMessagelike *msg = group->markers.complete;
-       msg; msg = msg->next)
-   {
-      Assert(msg->type == Messagelike_Marker);
-
-      RobotRecording_Marker marker = {};
-      marker.length = (u16) msg->text.length;
-      marker.pos = msg->marker.pos;
-      marker.begin_time = msg->begin_time;
-      marker.end_time = msg->end_time;
-      WriteStruct(file, &marker);
-      WriteString(file, msg->text);
-   }
-   
-   for(RecorderMessagelike *msg = group->paths.complete;
-       msg; msg = msg->next)
-   {
-      Assert(msg->type == Messagelike_Path);
-
-      RobotRecording_Path path = {};
-      path.length = (u16) msg->text.length;
-      path.control_point_count = (u8) msg->path.control_point_count;
-      path.begin_time = msg->begin_time;
-      path.end_time = msg->end_time;
-      WriteStruct(file, &path);
-      WriteString(file, msg->text);
-      WriteArray(file, msg->path.control_points, msg->path.control_point_count);
-   }
+   entry->curr_diag = NULL;
+   return recording_count;
 }
 
-void AppendChunk(RobotRecorder *state) {
+u32 WriteMessage(buffer *chunk, RecorderEntry *entry) {
+   Assert(entry->type == North_VisType::Message);
+
+   //TODO: this writes these in reverse chronological order
+   u32 recording_count = 0;
+   for(RecorderMessage *msg = entry->curr_msg; msg; msg = msg->next) {
+      RobotRecording_Message file_msg = {};
+      file_msg.text_length = msg->text.length;
+      file_msg.begin_time = msg->begin_time;
+      file_msg.end_time = msg->end_time;
+      WriteStruct(chunk, &file_msg);
+      WriteString(chunk, msg->text);
+      
+      recording_count++;
+   }
+
+   entry->curr_msg = NULL;
+   return recording_count;
+}
+//---------------------------------------------------
+
+typedef u32 (*entry_writer_callback)(buffer *chunk, RecorderEntry *entry);
+entry_writer_callback entry_writers[North_VisType::TypeCount] = {
+   NULL, //Invalid 0
+   WriteVertexData, //Polyline = 1
+   WriteVertexData, //Triangles = 2
+   WriteVertexData, //Points = 3
+   WriteRobotPose, //RobotPose = 4
+   WriteDiagnostics, //Diagnostic = 5
+   WriteMessage, //Message = 6
+};
+
+void WriteChunk(RobotRecorder *state) {
    buffer chunk = PushTempBuffer(Megabyte(5));
-   //TODO
+
+   RobotRecording_Chunk *chunk_header = PushStruct(&chunk, RobotRecording_Chunk);
+   for(RecorderEntry *entry = state->first_entry; entry; entry = entry->next) {
+      RobotRecording_Entry *entry_header = PushStruct(&chunk, RobotRecording_Entry);
+      entry_header->type = (u8)entry->type;
+      entry_header->name_length = entry->name.length;
+      WriteString(&chunk, entry->name);
+      u64 begining_offset = chunk.offset;
+
+      //Writes to the chunk and flushes the entry's recordings
+      entry_header->recording_count = entry_writers[entry->type](&chunk, entry);
+      
+      entry_header->size = chunk.offset - begining_offset;
+      chunk_header->entry_count++;  
+   }
+
+   //TODO: reset recording_arena
+   //TODO: get rid of any entries that had no recordings?
+
+   //Increment chunk_count in file header
+   state->curr_header.chunk_count++;
+   WriteFileRange(state->curr_file, Buffer(sizeof(RobotRecording_FileHeader), (u8 *) &state->curr_header, sizeof(RobotRecording_FileHeader)), sizeof(FileHeader));
+   
+   //Append chunk to file
+   WriteFileAppend(state->curr_file, chunk);
 }
 
-void WriteHeader(RobotRecorder *state) {
-   //TODO
-}
+//---------
+void RecieveVertexData(buffer *packet, RobotRecorder *state, string name, f32 curr_time, North_VisType::type type) {
+   MemoryArena *arena = state->arena;
+   Vis_VertexData *vdata = ConsumeStruct(packet, Vis_VertexData);
+   v2 *points = ConsumeArray(packet, v2, vdata->point_count);
 
-void EndRecording(RobotRecorder *state, string recording_name) {
-   Assert(state->recording);
-   state->recording = false;
-   
-   buffer file = PushTempBuffer(Megabyte(5));
+   RecorderEntry *entry = GetOrCreateEntry(state, name, type, true);
+   bool equivalent = true; //TODO: Compare hashes instead of comparing each point
+   if(entry->curr_vdata != NULL) {
+      equivalent = (vdata->colour == entry->curr_vdata->colour) && 
+                   (vdata->point_count == entry->curr_vdata->point_count);
 
-   FileHeader numbers = header(ROBOT_RECORDING_MAGIC_NUMBER, ROBOT_RECORDING_CURR_VERSION);
-   WriteStruct(&file, &numbers);
-   
-   RobotRecording_FileHeader header = {};
-   header.timestamp = 0; //TODO: actually get the timestamp
-   header.robot_name_length = recording_name.length; //TODO: actually get the robot name
-   header.group_count = state->group_count;
-   header.robot_state_sample_count = state->sample_count;
-   WriteStruct(&file, &header);
-   WriteString(&file, recording_name);
-
-   {
-      RobotRecording_RobotStateSample *samples = PushTempArray(RobotRecording_RobotStateSample, state->sample_count);
-      u32 sample_i = 0;
-      for(RobotStateSampleBlock *curr = &state->first_sample_block;
-         curr; curr = curr->next) {
-         for(u32 i = 0; i < curr->count; i++) {
-            samples[sample_i++] = curr->samples[i];
+      if(equivalent) {
+         for(u32 i = 0; i < vdata->point_count; i++) {
+            if(points[i] != entry->curr_vdata->points[i]) {
+               equivalent = false;
+               break;
+            }
          }
       }
-      WriteArray(&file, samples, state->sample_count);
    }
 
-   WriteGroup(&file, &state->default_group);
-   for(RecorderGroup *group = state->first_group;
-       group; group = group->next_in_list)
-   {
-      WriteGroup(&file, group);
-   }
+   if((entry->curr_vdata == NULL) || !equivalent || entry->ended_recording) {
+      if(entry->curr_vdata != NULL)
+         entry->curr_vdata->end_time = curr_time;
+      
+      RecorderVertexData *new_vdata = PushStruct(arena, RecorderVertexData);
+      new_vdata->point_count = vdata->point_count;
+      new_vdata->points = PushArrayCopy(arena, v2, points, vdata->point_count);
+      new_vdata->colour = vdata->colour;
+      new_vdata->begin_time = curr_time;
+      new_vdata->end_time = curr_time;
 
-   WriteEntireFile(Concat(recording_name, Literal(".ncrr")), file);
+      new_vdata->next = entry->curr_vdata;
+      entry->curr_vdata = new_vdata;
+      entry->ended_recording = false;
+   } else if(equivalent) {
+      entry->curr_vdata->end_time = curr_time;
+   }
 }
 
-//PARSING-STATE-PACKETS------------------------------
-void StatePacket_ParseGroup(f32 time, buffer *packet, RobotRecorder *state) {
-   State_Group *header = ConsumeStruct(packet, State_Group);
-   string group_name = ConsumeString(packet, header->name_length);
+void RecieveVisRobotPose(buffer *packet, RobotRecorder *state, string name, f32 curr_time, North_VisType::type type) {
+   MemoryArena *arena = state->arena;
+   Vis_RobotPose *pose = ConsumeStruct(packet, Vis_RobotPose);
    
-   RecorderGroup *group = GetOrCreateRecorderGroup(state, group_name);
-
-   for(u32 i = 0; i < header->diagnostic_count; i++) {
-      State_Diagnostic *diag_header = ConsumeStruct(packet, State_Diagnostic);
-      string diag_name = ConsumeString(packet, diag_header->name_length);
-
-
-      AddDiagnosticSample(group, diag_name, 
-                          (North_Unit::type) diag_header->unit,
-                          diag_header->value, time); 
+   RecorderEntry *entry = GetOrCreateEntry(state, name, type, false);
+   if((entry->curr_poses == NULL) || (entry->curr_poses->sample_count == ArraySize(entry->curr_poses->samples))) {
+      RecorderPoses *new_poses = PushStruct(arena, RecorderPoses);
+      new_poses->next = entry->curr_poses;
+      entry->curr_poses = new_poses;
    }
 
-   BeginUpdates(&group->messages);
-   for(u32 i = 0; i < header->message_count; i++) {
-      State_Message *packet_message = ConsumeStruct(packet, State_Message);
-      string text = ConsumeString(packet, packet_message->length);
-      AddOrUpdateMessage(group, time, text,
-                         (North_MessageType::type) packet_message->type);
-   }
-   CheckForComplete(&group->messages, time);
+   entry->curr_poses->samples[entry->curr_poses->sample_count].time = curr_time;
+   entry->curr_poses->samples[entry->curr_poses->sample_count].pos = pose->pos;
+   entry->curr_poses->samples[entry->curr_poses->sample_count].angle = pose->angle;
+   entry->curr_poses->sample_count++;
+}
 
-   BeginUpdates(&group->markers);
-   for(u32 i = 0; i < header->marker_count; i++) {
-      State_Marker *packet_marker = ConsumeStruct(packet, State_Marker);
-      string text = ConsumeString(packet, packet_marker->length);
-      AddOrUpdateMarker(group, time, text, packet_marker->pos);
-   }
-   CheckForComplete(&group->markers, time);
+void RecieveVisDiagnostic(buffer *packet, RobotRecorder *state, string name, f32 curr_time, North_VisType::type type) {
+   MemoryArena *arena = state->arena;
+   Vis_Diagnostic *diag = ConsumeStruct(packet, Vis_Diagnostic);
+   string unit_name = ConsumeString(packet, diag->unit_name_length);
 
-   BeginUpdates(&group->paths);
-   for(u32 i = 0; i < header->path_count; i++) {
-      State_Path *packet_path = ConsumeStruct(packet, State_Path);
-      string text = ConsumeString(packet, packet_path->length);
-      North_HermiteControlPoint *control_points = ConsumeArray(packet, North_HermiteControlPoint, packet_path->control_point_count);
-      AddOrUpdatePath(group, time, text, 
-                      packet_path->control_point_count,
-                      control_points);
+   RecorderEntry *entry = GetOrCreateEntry(state, name, type, false);
+   if((entry->curr_diag == NULL) || (entry->curr_diag->sample_count == ArraySize(entry->curr_diag->samples))) {
+      RecorderDiagnostic *new_diag = PushStruct(arena, RecorderDiagnostic);
+      new_diag->unit = PushCopy(arena, unit_name);
+
+      new_diag->next = entry->curr_diag;
+      entry->curr_diag = new_diag;
    }
-   CheckForComplete(&group->paths, time);
+
+   entry->curr_diag->samples[entry->curr_diag->sample_count].time = curr_time;
+   entry->curr_diag->samples[entry->curr_diag->sample_count].value = diag->value;
+   entry->curr_diag->sample_count++;
+}
+
+void RecieveVisMessage(buffer *packet, RobotRecorder *state, string name, f32 curr_time, North_VisType::type type) {
+   MemoryArena *arena = state->arena;
+   Vis_Message *msg = ConsumeStruct(packet, Vis_Message);
+   string text = ConsumeString(packet, msg->text_length);
+
+   RecorderEntry *entry = GetOrCreateEntry(state, name, type, true/*time based*/);
+   if((entry->curr_msg == NULL) || (entry->curr_msg->text != text) || entry->ended_recording) {
+      if(entry->curr_msg != NULL)
+         entry->curr_msg->end_time = curr_time;
+      
+      RecorderMessage *new_recording = PushStruct(arena, RecorderMessage);
+      new_recording->text = PushCopy(arena, text);
+      new_recording->begin_time = curr_time;
+      new_recording->end_time = curr_time;
+
+      new_recording->next = entry->curr_msg;
+      entry->curr_msg = new_recording;
+      entry->ended_recording = false;
+   } else if(entry->curr_msg->text == text) {
+      entry->curr_msg->end_time = curr_time;
+   }
+}
+//-----------
+
+typedef void (*entry_reciever_callback)(buffer *packet, RobotRecorder *state, string name, f32 curr_time, North_VisType::type type);
+entry_reciever_callback entry_recievers[North_VisType::TypeCount] = {
+   NULL, //Invalid 0
+   RecieveVertexData, //Polyline = 1
+   RecieveVertexData, //Triangles = 2
+   RecieveVertexData, //Points = 3
+   RecieveVisRobotPose, //RobotPose = 4
+   RecieveVisDiagnostic, //Diagnostic = 5
+   RecieveVisMessage, //Message = 6
+};
+
+bool hasEntryReciever(u8 type) {
+   return (type < North_VisType::TypeCount) && (entry_recievers[type] != NULL);
+}
+
+void ParseVisEntry(RobotRecorder *state, f32 curr_time, buffer *packet) {
+   Vis_Entry *entry_header = ConsumeStruct(packet, Vis_Entry);
+   string name = ConsumeString(packet, entry_header->name_length);
+
+   if(hasEntryReciever(entry_header->type)) {
+      entry_recievers[entry_header->type](packet, state, name, curr_time, (North_VisType::type)entry_header->type);
+   } else {
+      //TODO: report unknown entry type?
+      ConsumeSize(packet, entry_header->size);
+   }
+}
+
+void BeginUpdates(RobotRecorder *state) {
+   for(RecorderEntry *entry = state->first_entry; entry; entry = entry->next) {
+      entry->accessed = false;
+   }
+}
+
+void EndUpdates(RobotRecorder *state) {
+   for(RecorderEntry *entry = state->first_entry; entry; entry = entry->next) {
+      if(entry->time_based && !entry->accessed) {
+         entry->ended_recording = true;
+      }
+   }
 }
 
 void RecieveStatePacket(RobotRecorder *state, buffer packet) {
@@ -689,25 +661,57 @@ void RecieveStatePacket(RobotRecorder *state, buffer packet) {
       return;
 
    MemoryArena *arena = state->arena;
+   VisHeader *header = ConsumeStruct(&packet, VisHeader);
 
-   //TODO: if we're run out of space in the arena, 
-   //      write a chunk & reset the arena before parsing the packet 
+   u64 curr_frame = header->frame_number;
+   f32 curr_time = header->time;
 
-   State_PacketHeader *header = ConsumeStruct(&packet, State_PacketHeader);
-   f32 time = header->time;
-   state->latest_time = time;
+   if(state->latest_frame != curr_frame) {
+      EndUpdates(state);
+      BeginUpdates(state);
+      state->latest_frame = curr_frame;
+   }
+
+   for(u32 i = 0; i < header->entry_count; i++) {
+      ParseVisEntry(state, curr_time, &packet);
+   }
+}
+
+void BeginRecording(RobotRecorder *state) {
+   Assert(!state->recording);
+   state->recording = true;
+
+   Reset(state->arena);
+   state->latest_frame = 0;
+   state->first_entry = NULL;
+
+   //TODO: get real data for this
+      u64 timestamp = 10;
+      string robot_name = Literal("test_robot");
+      f32 robot_width = 0.25;
+      f32 robot_length = 0.25;
+      string recording_name = Literal("test_recording");
    
-   if(state->curr_sample_block->count >= ArraySize(state->curr_sample_block->samples)) {
-      RobotStateSampleBlock *new_sample_block = PushStruct(arena, RobotStateSampleBlock);
+   state->curr_header.timestamp = timestamp;
+   state->curr_header.robot_name_length = robot_name.length;
+   state->curr_header.robot_width = robot_width;
+   state->curr_header.robot_length = robot_length;
+   state->curr_header.chunk_count = 0;
 
-      state->curr_sample_block->next = new_sample_block;
-      state->curr_sample_block = new_sample_block;
-   }
-   state->curr_sample_block->samples[state->curr_sample_block->count++] = { header->pos, header->angle, time };
-   state->sample_count++;
+   buffer file_start = PushTempBuffer(Kilobyte(10));
+   FileHeader numbers = header(ROBOT_RECORDING_MAGIC_NUMBER, ROBOT_RECORDING_CURR_VERSION);
+   WriteStruct(&file_start, &numbers);
+   WriteStruct(&file_start, &state->curr_header);
+   WriteString(&file_start, robot_name);
 
-   StatePacket_ParseGroup(time, &packet, state);
-   for(u32 i = 0; i < header->group_count; i++) {
-      StatePacket_ParseGroup(time, &packet, state);
-   }
+   state->curr_file = CreateFile(Concat(recording_name, Literal(".ncrr")));
+   WriteFileAppend(state->curr_file, file_start);
+}
+
+void EndRecording(RobotRecorder *state, string recording_name) {
+   Assert(state->recording);
+   state->recording = false;
+
+   WriteChunk(state);
+   CloseFile(state->curr_file);
 }
