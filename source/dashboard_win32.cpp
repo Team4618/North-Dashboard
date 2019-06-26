@@ -24,18 +24,6 @@
 
 #include "lib/ui_impl_win32_opengl.cpp"
 
-#if 0
-SOCKET tcp_socket;
-bool was_connected = false;
-bool tcp_connected = false;
-f32 last_recv_time = 0;
-
-void SendPacket(buffer packet) {
-   s32 sent = send(tcp_socket, (char *)packet.data, packet.offset, 0);
-   // OutputDebugStringA(ToCString(Concat(Literal("Sent "), ToString(sent), Literal(" bytes\n"))));
-}
-#endif
-
 #include "north_defs/north_common_definitions.h"
 #include "north_defs/north_file_definitions.h"
 #include "north_defs/north_network_definitions.h"
@@ -44,121 +32,6 @@ void SendPacket(buffer packet) {
 
 #include "dashboard.cpp"
 #include "network.cpp"
-
-#if 0
-void CreateSocket() {
-   tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-   u_long non_blocking = true;
-   ioctlsocket(tcp_socket, FIONBIO, &non_blocking);
-}
-
-u32 sent_packet_count = 0;
-void HandleConnectionStatus(DashboardState *state) {
-   if(recv(tcp_socket, NULL, 0, 0) == SOCKET_ERROR) {
-      s32 wsa_error = WSAGetLastError();
-      if(wsa_error == WSAENOTCONN) {
-         tcp_connected = false;
-      } else {
-         //actual error or blocking
-      }
-   }
-   
-   if((state->curr_time - last_recv_time) > 20 /*2*/) {
-      tcp_connected = false;
-   }
-
-   if(was_connected && !tcp_connected) {
-      sent_packet_count = 0;
-      
-      HandleDisconnect(state);
-      OutputDebugStringA(ToCString(Literal("Disconnecting, t = ") + ToString(state->curr_time - last_recv_time) + Literal("\n")));
-      
-      closesocket(tcp_socket);
-      CreateSocket();
-   }
-
-   was_connected = tcp_connected;
-
-   if(!tcp_connected) {
-      string team_number_string = ToString(state->settings.team_number);
-      
-      if(state->settings.team_number == 0) {
-         struct sockaddr_in server_addr = {};
-         server_addr.sin_family = AF_INET;
-         server_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
-         server_addr.sin_port = htons(5800);
-
-         if(connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr)) != 0) {
-            // OutputDebugStringA(ToCString(Concat( ToString(WSAGetLastError()), Literal("\n") )));
-         }
-      } else if(team_number_string.length == 4) {
-         //TODO: check multiple possible address options
-         struct sockaddr_in server_addr = {};
-         server_addr.sin_family = AF_INET;
-         //TODO: actually generate the ip from the team number string
-         // server_addr.sin_addr.s_addr = inet_addr("10.46.18.2");
-         server_addr.sin_addr.s_addr = inet_addr("10.0.5.4");
-         server_addr.sin_port = htons(5800);
-
-         if(connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr)) != 0) {
-            // OutputDebugStringA(ToCString(Concat( ToString(WSAGetLastError()), Literal("\n") )));
-         }
-      }
-      
-      //TODO: support non 4 digit team numbers
-   } else {
-      //NOTE: send to maintain connection
-      PacketHeader heartbeat = {0, PacketType::Heartbeat};
-      send(tcp_socket, (char *) &heartbeat, sizeof(heartbeat), 0);
-   }
-}
-
-void HandleNetworking(DashboardState *state) {
-   bool has_packets = true;
-   while(has_packets) {
-      PacketHeader header = {};
-      u32 recv_return = recv(tcp_socket, (char *) &header, sizeof(header), MSG_PEEK);
-      
-      if(recv_return == SOCKET_ERROR) {
-         has_packets = false;
-         s32 wsa_error = WSAGetLastError();
-
-         if((wsa_error != 0) && (wsa_error != WSAEWOULDBLOCK)) {
-            //an actual error happened
-         }
-      } else if(recv_return == sizeof(PacketHeader)) {
-         buffer packet = PushTempBuffer(header.size + sizeof(PacketHeader));
-         recv_return = recv(tcp_socket, (char *) packet.data, packet.size, MSG_PEEK);
-         
-         //--------------------------
-         if(recv_return == packet.size) {
-            sent_packet_count++;
-         } else {
-            OutputDebugStringA(ToCString(ToString(recv_return) + Literal(" Pending\n")));
-         }
-         OutputDebugStringA(ToCString(Concat(Literal((recv_return == packet.size) ? "Recv" : "Icmp"), ToString((u32)(header.size + sizeof(PacketHeader))), Literal(" ") + ToString(header.type), Literal(" #"), ToString(sent_packet_count), Literal("\n") )));
-         if(header.type > 4) {
-            int test = 12;
-         }
-         //--------------------------
-         
-         if(recv_return == packet.size) {
-            recv(tcp_socket, (char *) packet.data, packet.size, 0);
-            
-            ConsumeStruct(&packet, PacketHeader);
-            HandlePacket(state, (PacketType::type) header.type, packet);
-         
-            tcp_connected = true;
-            last_recv_time = state->curr_time;
-         } else {
-            has_packets = false;
-         }
-      }
-   }
-
-   HandleConnectionStatus(state);
-}
-#endif
 
 // #include "test_file_writing.cpp"
 
@@ -197,7 +70,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
    WSADATA winsock_data = {};
    WSAStartup(MAKEWORD(2, 2), &winsock_data);
    CreateSocket();
-   // tcp_buffer = Buffer(???);
+
+   MemoryArena *net_arena = PlatformAllocArena(Megabyte(2), "Net Arena");
+   tcp_send_buffer = PushBuffer(net_arena, Megabyte(1));
+   tcp_recv_buffer = PushBuffer(net_arena, Megabyte(1));
 
    //NOTE: test code, writes out a bunch of test files
    // WriteTestFiles();
@@ -215,6 +91,9 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
       }
 
       Reset(__temp_arena);
+      DrainNetStream();
+      SendQueuedPackets();
+
       PacketHeader header = {};
       buffer packet = {};
       while(HasPackets(ui_context.curr_time, &header, &packet)) {

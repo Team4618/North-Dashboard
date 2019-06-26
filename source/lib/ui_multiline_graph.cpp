@@ -105,6 +105,7 @@ struct MultiLineGraphData {
    f32 abs_min_time;
    f32 abs_max_time;
 
+   // u32 unit_count;
    UnitSettings units[32];
 
    bool automatic_max_time;
@@ -467,12 +468,19 @@ element *_ImmutableMultiLineGraph(ui_id id, element *parent, MultiLineGraphData 
    return _MultiLineGraph(id, parent, data, size, padding, margin, true);  
 }
 
+//REMOVE----------------------
 //NOTE: the "suffix" string must exist for the entire lifetime of the graph
 void SetUnit(MultiLineGraphData *data, u32 unit_id, string suffix) {
    Assert(unit_id < ArraySize(data->units));
    data->units[unit_id].suffix = suffix;
 }
+//----------------------------
 
+// u32 GetOrCreateUnit(MultiLineGraphData *data, string suffix) {
+//    for(u32 i = 0; i < )
+// }
+
+// void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 unit) {
 void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 unit_id) {
    bool first_entry = (data->first == NULL);
 

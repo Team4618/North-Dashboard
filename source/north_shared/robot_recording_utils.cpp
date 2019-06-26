@@ -84,7 +84,7 @@ LoadedRecording *GetOrCreateLoadedRecording(LoadedRobotRecording *state, string 
    for(u32 i = 0; i < path.part_count - 1; i++) {
       string ns_name = path.parts[i];
       bool found = false;
-      
+
       for(RecordingNamespace *ns = curr_namespace->first_child; ns; ns = ns->next) {
          if(ns->name == ns_name) {
             curr_namespace = ns;
@@ -225,6 +225,8 @@ void parseMessage(LoadedRobotRecording *state, LoadedRecording *recording, buffe
 //---------------------------------------------------------
 
 typedef void (*entry_parser_callback)(LoadedRobotRecording *state, LoadedRecording *recording, buffer *file, bool count);
+extern entry_parser_callback entry_parsers[North_VisType::TypeCount];
+
 entry_parser_callback entry_parsers[North_VisType::TypeCount] = {
    NULL, //Invalid 0
    parseVertexData, //Polyline = 1
@@ -475,6 +477,8 @@ u32 WriteMessage(buffer *chunk, RecorderEntry *entry) {
 //---------------------------------------------------
 
 typedef u32 (*entry_writer_callback)(buffer *chunk, RecorderEntry *entry);
+extern entry_writer_callback entry_writers[North_VisType::TypeCount];
+
 entry_writer_callback entry_writers[North_VisType::TypeCount] = {
    NULL, //Invalid 0
    WriteVertexData, //Polyline = 1
@@ -715,3 +719,173 @@ void EndRecording(RobotRecorder *state, string recording_name) {
    WriteChunk(state);
    CloseFile(state->curr_file);
 }
+
+//UI----------------------------------
+#ifdef INCLUDE_DRAWRECORDINGS
+
+//-----------------------------------
+void DrawPointsRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
+   if(page) {
+      Label(page, rec->name, 20, BLACK);
+   }
+
+   if(!rec->hidden) {
+      for(u32 i = 0; i < rec->vdata.vdata_count; i++) {
+         VertexDataRecording *vdata = rec->vdata.vdata + i;
+         if((vdata->begin_time <= state->curr_time) && (state->curr_time <= vdata->end_time)) {
+            //Replace this with one call that takes the points & a transform matrix
+            for(u32 j = 0; j < vdata->point_count; j++) {
+               v2 p = GetPoint(field, vdata->points[j]);
+               Rectangle(field->e, RectCenterSize(p, V2(5, 5)), vdata->colour);
+            }
+            //------------------------------
+         }
+      }
+   }
+}
+
+void DrawPolylineRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
+   if(page) {
+      Label(page, rec->name, 20, BLACK);
+   }
+
+   for(u32 i = 0; i < rec->vdata.vdata_count; i++) {
+      VertexDataRecording *vdata = rec->vdata.vdata + i;
+      if((vdata->begin_time <= state->curr_time) && (state->curr_time <= vdata->end_time)) {
+         
+         v2 *transformed_points = PushTempArray(v2, vdata->point_count);
+         for(u32 j = 0; j < vdata->point_count; j++) {
+            transformed_points[j] = GetPoint(field, transformed_points[j]);
+         }
+         
+         _Line(field->e, vdata->colour, 3, transformed_points, vdata->point_count);
+      }
+   }
+}
+
+void DrawRobotPoseRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
+   if(page) {
+      Label(page, rec->name, 20, BLACK);
+   }
+   
+   for(u32 i = 0; i < rec->pose.sample_count; i++) {
+      RobotRecording_RobotStateSample sample = rec->pose.samples[i];
+      if(sample.time >= state->curr_time) {
+         DrawRobot(field, V2(0.5, 0.5), sample.pos, sample.angle, BLACK);
+         break;
+      }
+   }
+}
+
+void DrawMessageRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
+   if(page) {
+      Label(page, rec->name, 20, BLACK);
+      
+      for(u32 i = 0; i < rec->msg.message_count; i++) {
+         MessageRecording *msg = rec->msg.messages + i;
+         if((msg->begin_time <= state->curr_time) && (state->curr_time <= msg->end_time)) {
+            Label(page, msg->text, 20, BLACK, V2(20, 0));
+         }
+      }
+   }
+}
+//-----------------------------------
+
+void DrawRecordingNamespace(element *page, ui_field_topdown *field, LoadedRobotRecording *state, RecordingNamespace *ns) {
+   element *child_page = NULL;
+   
+   if(page) {
+      UI_SCOPE(page, ns);
+      button_style hide_button = ButtonStyle(
+         dark_grey, light_grey, BLACK,
+         light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
+         off_white, light_grey,
+         20, V2(0, 0), V2(0, 0));
+
+      element *top_row = RowPanel(page, Size(Size(page).x, 20));
+      Label(top_row, (ns->name.length == 0) ? Literal("/") : ns->name, 20, BLACK);
+      if(Button(top_row, ns->collapsed ? "  +  " : "  -  ", hide_button).clicked) {
+         ns->collapsed = !ns->collapsed;
+      }
+
+      child_page = ns->collapsed ? NULL : page;
+   }
+   
+   for(LoadedRecording *rec = ns->first_recording; rec; rec = rec->next) {
+      if(rec->type == North_VisType::Points) {
+         DrawPointsRecording(child_page, field, state, rec);
+      } else if(rec->type == North_VisType::RobotPose) {
+         DrawRobotPoseRecording(child_page, field, state, rec);
+      } else if(rec->type == North_VisType::Polyline) {
+         DrawPolylineRecording(child_page, field, state, rec);
+      } else if(rec->type == North_VisType::Message) {
+         DrawMessageRecording(child_page, field, state, rec);
+      }
+   }
+   
+   for(RecordingNamespace *child = ns->first_child; child; child = child->next) {
+      DrawRecordingNamespace(child_page, field, state, child);
+   }
+}
+
+void DrawRecordings(element *full_page, FileListLink *ncrr_files, LoadedRobotRecording *recording, 
+                    NorthSettings *settings, RobotProfiles *profiles)
+{
+   StackLayout(full_page);
+   element *page = VerticalList(full_page);
+   
+   element *top_bar = RowPanel(page, Size(Size(page).x - 10, page_tab_height).Padding(5, 5));
+   Background(top_bar, dark_grey);
+   static bool selector_open = false;
+
+   if(Button(top_bar, "Open Recording", menu_button.IsSelected(selector_open)).clicked) {
+      selector_open = !selector_open;
+   }
+
+   if(selector_open) {
+      for(FileListLink *file = ncrr_files; file; file = file->next) {
+         UI_SCOPE(page->context, file);
+         
+         if(Button(page, file->name, menu_button).clicked) {
+            LoadRecording(recording, file->name);
+            selector_open = false;
+         }
+      }
+   } else {
+      if(recording->loaded) {
+         static bool is_playing = false;
+         if(Button(top_bar, is_playing ? "Stop" : "Play", menu_button).clicked) {
+            is_playing = !is_playing;
+         }
+
+         if(is_playing) {
+            recording->curr_time += page->context->dt;
+            if(recording->curr_time > recording->max_time) {
+               is_playing = false;
+               recording->curr_time = recording->max_time;
+            }
+         }
+
+         ui_field_topdown field = {};
+
+         if(settings->field.loaded) {
+            field = FieldTopdown(page, settings->field.image, settings->field.size, 
+                                 Clamp(0, Size(page->bounds).x, 700));
+
+            DrawRecordingNamespace(page, &field, recording, &recording->root_namespace);
+            
+            //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
+            HorizontalSlider(page, &recording->curr_time, recording->min_time, recording->max_time,
+                             V2(Size(page->bounds).x - 60, 40), V2(20, 20));
+         
+         } else {
+            Label(page, "No field loaded", 20, BLACK);
+         }
+      } else {   
+         selector_open = true;
+      }
+   }
+}
+
+#endif
+//------------------------------------

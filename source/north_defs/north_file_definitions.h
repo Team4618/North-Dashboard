@@ -54,6 +54,8 @@ struct Field_FileHeader {
    u16 image_height;
    //Field_StartingPosition [starting_position_count]
    //u32 field_image [image_width * image_height] RGBA encoded
+
+   //TODO: northslam block
 };
 //-----------------------------------------------------------
 

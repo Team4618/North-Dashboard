@@ -149,12 +149,11 @@ void UpdateSettingsFile(NorthSettings *settings) {
    OutputDebugStringA("settings updated\n");
 }
 
-void WriteNewFieldFile(string name, f32 width, f32 height, string img_file_name) {
+void WriteNewFieldFile(string name, f32 width, f32 height, image img) {
    FileHeader numbers = header(FIELD_MAGIC_NUMBER, FIELD_CURR_VERSION);
    Field_FileHeader header = {};
    header.width = width;
    header.height = height;
-   image img = ReadImage(img_file_name);
    header.image_width = img.valid ? img.width : 0;
    header.image_height = img.valid ? img.height : 0;
 
@@ -349,8 +348,11 @@ void DrawSettings(element *full_page, NorthSettings *state,
                    (image_path.length > 0) && (image_preview.handle != 0);
       
       if(Button(top_panel, "Create", menu_button.IsEnabled(valid)).clicked) {
+         image background_img = ReadImage(image_path);
          WriteNewFieldFile(GetText(name_box), new_field_width,
-                           new_field_height, image_path);
+                           new_field_height, background_img);
+         FreeImage(&background_img);
+
          curr_page = SettingsPage_Main;
       }
 
@@ -374,6 +376,8 @@ void DrawSettings(element *full_page, NorthSettings *state,
          image_size = V2(new_field_img.width, new_field_img.height);
          FreeImage(&new_field_img);
       }
+
+      //TODO: colour picker
 
       if(image_preview.handle == 0) { 
          Label(image_drop, "Drop Field Image File Here", Size(image_drop), 40, off_white);

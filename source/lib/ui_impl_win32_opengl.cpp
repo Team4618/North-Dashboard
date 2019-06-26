@@ -55,6 +55,14 @@ PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer;
 //NOTE: textures
 PFNGLUNIFORM1IPROC glUniform1i;
 PFNGLACTIVETEXTUREPROC glActiveTexture;
+PFNGLGENERATEMIPMAPPROC glGenerateMipmap;
+
+//NOTE: framebuffers
+PFNGLTEXIMAGE2DMULTISAMPLEPROC glTexImage2DMultisample;
+PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
+PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
+PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D;
+PFNGLBLITFRAMEBUFFERPROC glBlitFramebuffer;
 
 image ReadImage(char *path, bool in_exe_directory) {
    image result = {};
@@ -79,8 +87,10 @@ image ReadImage(string path, bool in_exe_directory) {
 }
 
 void FreeImage(image *i) {
-   if(i->valid)
+   if(i->valid) {
       stbi_image_free(i->texels);
+      *i = {};
+   }
 }
 
 texture loadTexture(char *path, bool in_exe_directory) {
@@ -93,20 +103,23 @@ texture loadTexture(char *path, bool in_exe_directory) {
 }
 
 texture createTexture(u32 *texels, u32 width, u32 height) {
+   bool mipmap = false; //TODO: turning this on makes the font look a bit nicer
    texture result = {};
    result.size = V2(width, height);
       
    glGenTextures(1, &result.handle);
    glBindTexture(GL_TEXTURE_2D, result.handle);
-      // glTexStorage2D(result.handle, 1, GL_RGBA8, width, height);
-      // glTexSubImage2D(, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, texels);
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texels);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      if(mipmap)
+         glGenerateMipmap(GL_TEXTURE_2D);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmap ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
    glBindTexture(GL_TEXTURE_2D, 0);
 
    return result;
-}
+} 
 
 void deleteTexture(texture tex) {
    if(tex.handle != 0)
@@ -121,7 +134,7 @@ glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint) {
       //TODO: make sure this works as expected
       TempArena temp_arena;
 
-      f32 line_height = 100;    
+      f32 line_height = 200;    
       f32 scale = stbtt_ScaleForPixelHeight(&font->fontinfo, line_height);
       
       //NOTE: stb_truetype has SDF generation so we _could_ use that 
@@ -413,7 +426,15 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    //-----------------------
    glUniform1i = (PFNGLUNIFORM1IPROC) wglGetProcAddress("glUniform1i");
    glActiveTexture = (PFNGLACTIVETEXTUREPROC) wglGetProcAddress("glActiveTexture");
-   
+   glGenerateMipmap = (PFNGLGENERATEMIPMAPPROC) wglGetProcAddress("glGenerateMipmap");
+
+   //-----------------------
+   glTexImage2DMultisample = (PFNGLTEXIMAGE2DMULTISAMPLEPROC) wglGetProcAddress("glTexImage2DMultisample");
+   glGenFramebuffers = (PFNGLGENFRAMEBUFFERSPROC) wglGetProcAddress("glGenFramebuffers");
+   glBindFramebuffer = (PFNGLBINDFRAMEBUFFERPROC) wglGetProcAddress("glBindFramebuffer");
+   glFramebufferTexture2D = (PFNGLFRAMEBUFFERTEXTURE2DPROC) wglGetProcAddress("glFramebufferTexture2D");
+   glBlitFramebuffer = (PFNGLBLITFRAMEBUFFERPROC) wglGetProcAddress("glBlitFramebuffer");
+
    //-----------------------
    PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback = (PFNGLDEBUGMESSAGECALLBACKPROC) wglGetProcAddress("glDebugMessageCallback");
    OutputDebugStringA((glDebugMessageCallback != NULL) ? "OpenGL Debugging Supported\n" : "OpenGL Debugging Not Supported\n");
@@ -436,6 +457,8 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    gl.matrix_uniform = glGetUniformLocation(gl.shader, "Matrix");
    gl.texture_uniform = glGetUniformLocation(gl.shader, "Texture");
    //---------------------------
+
+   //TODO: create multisample framebuffer
 
    u32 white_texels[4] = {
       0xFFFFFFFF, 0xFFFFFFFF,

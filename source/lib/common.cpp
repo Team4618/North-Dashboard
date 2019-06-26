@@ -71,7 +71,7 @@ struct string {
 
    string& operator= (char *c_str) {
       this->text = c_str;
-      this->length = StringLength(c_str);
+      this->length = (c_str == NULL) ? 0 : StringLength(c_str);
       return *this;
    }
 };

@@ -1,195 +1,23 @@
-enum DashboardPage {
-   DashboardPage_Home,
-   DashboardPage_Recordings,
-   DashboardPage_Robots,
-   DashboardPage_Settings
-};
-
 #include "theme.cpp"
 
 #define INCLUDE_DRAWSETTINGS
 #include "north_shared/north_settings_utils.cpp"
-#include "north_shared/robot_recording_utils.cpp"
 #define INCLUDE_DRAWPROFILES
 #include "north_shared/robot_profile_utils.cpp"
+#define INCLUDE_DRAWRECORDINGS
+#include "north_shared/robot_recording_utils.cpp"
 
 #include "north_shared/auto_project_utils.cpp"
 
-// struct ConnectedMessage {
-//    string text;
-//    North_MessageType::type type;
-// };
+#include "dashboard_live_view.cpp"
 
-// struct ConnectedMarker {
-//    string text;
-//    v2 pos;
-// };
-
-// struct ConnectedPath {
-//    string text;
-//    u32 control_point_count;
-//    North_HermiteControlPoint *control_points;
-// };
-
-struct ConnectedVisEntry {
-   North_VisType::type type;
-   string name;
-
-   union {
-
-   };
+enum DashboardPage {
+   DashboardPage_Home,
+   DashboardPage_Auto,
+   DashboardPage_Recordings,
+   DashboardPage_Robots,
+   DashboardPage_Settings
 };
-
-// struct ConnectedGroup {
-//    ConnectedGroup *next_in_list;
-//    ConnectedGroup *next_in_hash;
-//    string name;
-   
-//    bool hide_graph;
-//    MultiLineGraphData diagnostics_graph;
-
-//    bool hide_messages;
-//    u32 message_count;
-//    ConnectedMessage *messages;
-
-//    bool hide_markers;
-//    u32 marker_count;
-//    ConnectedMarker *markers;
-
-//    bool hide_paths;
-//    u32 path_count;
-//    ConnectedPath *paths;
-// };
-
-struct ConnectedState {
-   //NOTE: both owned by ConnectedState
-   MemoryArena *group_arena;
-   MemoryArena *messagelike_arena; //NOTE: gets reset every time we recieve a state packet
-
-   // RobotRecording_RobotStateSample pos_samples[1024];
-   // u32 curr_pos_sample;
-   // u32 pos_sample_count;
-
-   // u32 group_count;
-   // ConnectedGroup default_group;
-   // ConnectedGroup *first_group;
-   // ConnectedGroup *group_hash[64];
-
-   // North_GameMode::type prev_mode;
-   // North_GameMode::type mode;
-};
-
-void ResetConnectedState(ConnectedState *state) {
-   Reset(state->group_arena);
-   Reset(state->messagelike_arena);
-   // state->curr_pos_sample = 0;
-   // state->pos_sample_count = 0;
-
-   // state->group_count = 0;
-   // ZeroStruct(&state->default_group);
-   // state->default_group.diagnostics_graph = NewMultiLineGraph(PushArena(state->group_arena, Megabyte(4)));
-
-   // state->first_group = NULL;
-   // ZeroStruct(&state->group_hash);
-}
-
-// ConnectedGroup *GetOrCreateGroup(ConnectedState *state, string name) {
-//    if(name.length == 0)
-//       return &state->default_group;
-   
-//    MemoryArena *arena = state->group_arena;
-
-//    u32 hash = Hash(name) % ArraySize(state->group_hash);
-//    ConnectedGroup *result = NULL;
-//    for(ConnectedGroup *curr = state->group_hash[hash]; curr; curr = curr->next_in_hash) {
-//       if(curr->name == name) {
-//          result = curr;
-//       }
-//    }
-
-//    if(result == NULL) {
-//       auto *new_group = PushStruct(arena, ConnectedGroup);
-//       new_group->name = PushCopy(arena, name);
-      
-//       new_group->next_in_hash = state->group_hash[hash];
-//       new_group->next_in_list = state->first_group;
-
-//       //TODO: make this better
-//       new_group->diagnostics_graph = NewMultiLineGraph(PushArena(state->group_arena, Megabyte(4)));
-
-//       state->group_count++;
-//       state->group_hash[hash] = new_group;
-//       state->first_group = new_group;
-//       result = new_group;
-//    }
-   
-//    return result;
-// }
-
-// void ParseStateGroup(f32 time, ConnectedState *state, buffer *packet) {
-//    MemoryArena *arena = state->messagelike_arena;
-
-//    State_Group *header = ConsumeStruct(packet, State_Group);
-//    string group_name = ConsumeString(packet, header->name_length);
-
-//    ConnectedGroup *group = GetOrCreateGroup(state, group_name);
-
-//    for(u32 i = 0; i < header->diagnostic_count; i++) {
-//       State_Diagnostic *diag_header = ConsumeStruct(packet, State_Diagnostic);
-//       string diag_name = ConsumeString(packet, diag_header->name_length);
-
-//       AddEntry(&group->diagnostics_graph, diag_name, diag_header->value, time, (North_Unit::type) diag_header->unit);
-//    }
-
-//    group->message_count = header->message_count;
-//    group->messages = PushArray(arena, ConnectedMessage, header->message_count);
-//    for(u32 i = 0; i < header->message_count; i++) {
-//       State_Message *packet_message = ConsumeStruct(packet, State_Message);
-//       ConnectedMessage *msg = group->messages + i;
-
-//       msg->text = PushCopy(arena, ConsumeString(packet, packet_message->length));
-//       msg->type = (North_MessageType::type) msg->type;
-//    }
-
-//    group->marker_count = header->marker_count;
-//    group->markers = PushArray(arena, ConnectedMarker, header->marker_count);
-//    for(u32 i = 0; i < header->marker_count; i++) {
-//       State_Marker *packet_marker = ConsumeStruct(packet, State_Marker);
-//       ConnectedMarker *msg = group->markers + i;
-
-//       msg->text = PushCopy(arena, ConsumeString(packet, packet_marker->length));
-//       msg->pos = packet_marker->pos;
-//    }
-
-//    group->path_count = header->path_count;
-//    group->paths = PushArray(arena, ConnectedPath, header->path_count);
-//    for(u32 i = 0; i < header->path_count; i++) {
-//       State_Path *packet_path = ConsumeStruct(packet, State_Path);
-//       ConnectedPath *path = group->paths + i;
-
-//       path->text = PushCopy(arena, ConsumeString(packet, packet_path->length));
-//       path->control_point_count = packet_path->control_point_count;
-//       path->control_points = ConsumeAndCopyArray(arena, packet, North_HermiteControlPoint, packet_path->control_point_count);
-//    }
-// }
-
-void ParseStatePacket(ConnectedState *state, buffer packet) {
-   // MemoryArena *arena = state->messagelike_arena;
-   // Reset(arena);
-
-   // State_PacketHeader *header = ConsumeStruct(&packet, State_PacketHeader);
-   // state->mode = (North_GameMode::type) header->mode;
-   // f32 time = header->time;
-   
-   // RobotRecording_RobotStateSample sample = { header->pos, header->angle, time };
-   // state->pos_samples[state->curr_pos_sample++ % ArraySize(state->pos_samples)] = sample;
-   // state->pos_sample_count = Clamp(0, ArraySize(state->pos_samples), state->pos_sample_count + 1);
-
-   // ParseStateGroup(time, state, &packet);
-   // for(u32 i = 0; i < header->group_count; i++) {
-   //    ParseStateGroup(time, state, &packet);
-   // }
-}
 
 struct DashboardState {
    ConnectedState connected;
@@ -231,8 +59,8 @@ void reloadFiles(DashboardState *state) {
 }
 
 void initDashboard(DashboardState *state) {
-   state->connected.group_arena = PlatformAllocArena(Megabyte(10), "Connected Group");
-   state->connected.messagelike_arena = PlatformAllocArena(Megabyte(4), "Connected Messagelike");
+   state->connected.persistent_arena = PlatformAllocArena(Megabyte(10), "Connected Group");
+   state->connected.frame_arena = PlatformAllocArena(Megabyte(4), "Connected Messagelike");
    ResetConnectedState(&state->connected);
 
    state->settings.arena = PlatformAllocArena(Megabyte(1), "Settings");
@@ -294,72 +122,6 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
    DrawAutoNode(state, field, path->out_node, preview);
 }
 
-// void DrawConnectedGroup(ConnectedGroup *group, element *page, ui_field_topdown *field) {
-//    UI_SCOPE(page, group);
-
-//    button_style hide_button = ButtonStyle(
-//       dark_grey, light_grey, BLACK,
-//       light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
-//       off_white, light_grey,
-//       20, V2(0, 0), V2(0, 0));
-
-//    bool has_graph_data = !IsEmpty(&group->diagnostics_graph);
-//    element *top_row = RowPanel(page, Size(Size(page).x, 20));
-//    Label(top_row, (group->name.length == 0) ? Literal("Default Group") : group->name, 20, BLACK);
-//    if(Button(top_row, group->hide_graph ? "  Gra+  " : "  Gra-  ", hide_button.IsEnabled(has_graph_data)).clicked) {
-//       group->hide_graph = !group->hide_graph;
-//    }
-//    if(Button(top_row, group->hide_messages ? "  Msg+  " : "  Msg-  ", hide_button).clicked) {
-//       group->hide_messages = !group->hide_messages;
-//    }
-//    if(Button(top_row, group->hide_markers ? "  Mrk+  " : "  Mrk-  ", hide_button).clicked) {
-//       group->hide_markers = !group->hide_markers;
-//    }
-//    if(Button(top_row, group->hide_paths ? "  Pth+  " : "  Pth-  ", hide_button).clicked) {
-//       group->hide_paths = !group->hide_paths;
-//    }
-
-//    if(!group->hide_graph && has_graph_data) {
-//       MultiLineGraph(page, &group->diagnostics_graph, V2(Size(page->bounds).x - 10, 400), V2(5, 5));
-//    }
-
-//    if(!group->hide_messages) {
-//       for(u32 i = 0; i < group->message_count; i++) {
-//          ConnectedMessage *msg = group->messages + i;
-//          Label(page, msg->text, 20, BLACK);
-//       }
-//    }
-
-//    if(!group->hide_markers) {
-//       for(u32 i = 0; i < group->marker_count; i++) {
-//          ConnectedMarker *msg = group->markers + i;
-//          UI_SCOPE(page, msg);
-         
-//          v2 p = GetPoint(field, msg->pos);
-//          element *marker_panel = Panel(field->e, RectCenterSize(p, V2(5, 5)), 
-//                                        Captures(INTERACTION_HOT));
-//          Background(marker_panel, GREEN);
-
-//          if(IsHot(marker_panel)) {
-//             Outline(marker_panel, BLACK);
-//             //TODO: hover to see the marker text
-//          }
-//       }
-//    }
-
-//    if(!group->hide_paths) {
-//       for(u32 i = 0; i < group->path_count; i++) {
-//          ConnectedPath *path = group->paths + i;
-         
-//          for(u32 j = 0; j < (path->control_point_count - 1); j++) {
-//             North_HermiteControlPoint a = path->control_points[j];
-//             North_HermiteControlPoint b = path->control_points[j + 1];
-//             CubicHermiteSpline(field, a.pos, a.tangent, b.pos, b.tangent, BLACK);
-//          }
-//       }
-//    }
-// }
-
 void DrawHome(element *full_page, DashboardState *state) {
    StackLayout(full_page);
    element *page = VerticalList(full_page);
@@ -402,22 +164,7 @@ void DrawHome(element *full_page, DashboardState *state) {
       
       if(profile->state == RobotProfileState::Connected) {
          ConnectedState *conn_state = &state->connected;
-         // DrawConnectedGroup(&conn_state->default_group, page, &field);
-         // for(ConnectedGroup *curr_group = conn_state->first_group; curr_group; curr_group = curr_group->next_in_list) {
-         //    DrawConnectedGroup(curr_group, page, &field);
-         // }
-
-         //-----------------------------
-         //TODO: curr_pos_sample is really weird, make it act more reasonable
-         // RobotRecording_RobotStateSample curr_state = conn_state->pos_samples[conn_state->curr_pos_sample];
-         // DrawRobot(&field, profile->size, curr_state.pos, curr_state.angle, BLACK);
-
-         //TODO: fix conn_state->curr_pos_sample, it seems broken
-         // for(u32 i = 0; i < conn_state->pos_sample_count; i++) {
-         //    bool latest_sample = i == (conn_state->pos_sample_count - 1);
-         //    rect2 sample_bounds = RectCenterSize(GetPoint(&field, conn_state->pos_samples[i].pos), (latest_sample ? 1 : 0.5) * robot_size_px);
-         //    Rectangle(field.e, sample_bounds, latest_sample ? RED : GREEN);
-         // }
+         DrawLiveNamespace(page, &field, conn_state, &conn_state->root_namespace);
       }
       
       if(starting_pos_selected) {
@@ -461,168 +208,6 @@ void DrawHome(element *full_page, DashboardState *state) {
    }
 }
 
-//-----------------------------------
-void DrawPointsRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
-   if(page) {
-      Label(page, rec->name, 20, BLACK);
-   }
-
-   if(!rec->hidden) {
-      for(u32 i = 0; i < rec->vdata.vdata_count; i++) {
-         VertexDataRecording *vdata = rec->vdata.vdata + i;
-         if((vdata->begin_time <= state->curr_time) && (state->curr_time <= vdata->end_time)) {
-            //Replace this with one call that takes the points & a transform matrix
-            for(u32 j = 0; j < vdata->point_count; j++) {
-               v2 p = GetPoint(field, vdata->points[j]);
-               Rectangle(field->e, RectCenterSize(p, V2(5, 5)), vdata->colour);
-            }
-            //------------------------------
-         }
-      }
-   }
-}
-
-void DrawPolylineRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
-   if(page) {
-      Label(page, rec->name, 20, BLACK);
-   }
-
-   for(u32 i = 0; i < rec->vdata.vdata_count; i++) {
-      VertexDataRecording *vdata = rec->vdata.vdata + i;
-      if((vdata->begin_time <= state->curr_time) && (state->curr_time <= vdata->end_time)) {
-         
-         v2 *transformed_points = PushTempArray(v2, vdata->point_count);
-         for(u32 j = 0; j < vdata->point_count; j++) {
-            transformed_points[j] = GetPoint(field, transformed_points[j]);
-         }
-         
-         _Line(field->e, vdata->colour, 3, transformed_points, vdata->point_count);
-      }
-   }
-}
-
-void DrawRobotPoseRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
-   if(page) {
-      Label(page, rec->name, 20, BLACK);
-   }
-   
-   for(u32 i = 0; i < rec->pose.sample_count; i++) {
-      RobotRecording_RobotStateSample sample = rec->pose.samples[i];
-      if(sample.time >= state->curr_time) {
-         DrawRobot(field, V2(0.5, 0.5), sample.pos, sample.angle, BLACK);
-         break;
-      }
-   }
-}
-
-void DrawMessageRecording(element *page, ui_field_topdown *field, LoadedRobotRecording *state, LoadedRecording *rec) {
-   if(page) {
-      Label(page, rec->name, 20, BLACK);
-      
-      for(u32 i = 0; i < rec->msg.message_count; i++) {
-         MessageRecording *msg = rec->msg.messages + i;
-         if((msg->begin_time <= state->curr_time) && (state->curr_time <= msg->end_time)) {
-            Label(page, msg->text, 20, BLACK, V2(20, 0));
-         }
-      }
-   }
-}
-//-----------------------------------
-
-void DrawRecordingNamespace(element *page, ui_field_topdown *field, LoadedRobotRecording *state, RecordingNamespace *ns) {
-   element *child_page = NULL;
-   
-   if(page) {
-      UI_SCOPE(page, ns);
-      button_style hide_button = ButtonStyle(
-         dark_grey, light_grey, BLACK,
-         light_grey, V4(120/255.0, 120/255.0, 120/255.0, 1), WHITE, 
-         off_white, light_grey,
-         20, V2(0, 0), V2(0, 0));
-
-      element *top_row = RowPanel(page, Size(Size(page).x, 20));
-      Label(top_row, (ns->name.length == 0) ? Literal("/") : ns->name, 20, BLACK);
-      if(Button(top_row, ns->collapsed ? "  +  " : "  -  ", hide_button).clicked) {
-         ns->collapsed = !ns->collapsed;
-      }
-
-      child_page = ns->collapsed ? NULL : page;
-   }
-   
-   for(LoadedRecording *rec = ns->first_recording; rec; rec = rec->next) {
-      if(rec->type == North_VisType::Points) {
-         DrawPointsRecording(child_page, field, state, rec);
-      } else if(rec->type == North_VisType::RobotPose) {
-         DrawRobotPoseRecording(child_page, field, state, rec);
-      } else if(rec->type == North_VisType::Polyline) {
-         DrawPolylineRecording(child_page, field, state, rec);
-      } else if(rec->type == North_VisType::Message) {
-         DrawMessageRecording(child_page, field, state, rec);
-      }
-   }
-   
-   for(RecordingNamespace *child = ns->first_child; child; child = child->next) {
-      DrawRecordingNamespace(child_page, field, state, child);
-   }
-}
-
-void DrawRecordings(element *full_page, DashboardState *state) {
-   StackLayout(full_page);
-   element *page = VerticalList(full_page);
-   
-   element *top_bar = RowPanel(page, Size(Size(page).x - 10, page_tab_height).Padding(5, 5));
-   Background(top_bar, dark_grey);
-   static bool selector_open = false;
-
-   if(Button(top_bar, "Open Recording", menu_button.IsSelected(selector_open)).clicked) {
-      selector_open = !selector_open;
-   }
-
-   if(selector_open) {
-      for(FileListLink *file = state->ncrr_files; file; file = file->next) {
-         UI_SCOPE(page->context, file);
-         
-         if(Button(page, file->name, menu_button).clicked) {
-            LoadRecording(&state->recording, file->name);
-            selector_open = false;
-         }
-      }
-   } else {
-      if(state->recording.loaded) {
-         static bool is_playing = false;
-         if(Button(top_bar, is_playing ? "Stop" : "Play", menu_button).clicked) {
-            is_playing = !is_playing;
-         }
-
-         if(is_playing) {
-            state->recording.curr_time += page->context->dt;
-            if(state->recording.curr_time > state->recording.max_time) {
-               is_playing = false;
-               state->recording.curr_time = state->recording.max_time;
-            }
-         }
-
-         ui_field_topdown field = {};
-
-         if(state->settings.field.loaded) {
-            field = FieldTopdown(page, state->settings.field.image, state->settings.field.size, 
-                                 Clamp(0, Size(page->bounds).x, 700));
-
-            DrawRecordingNamespace(page, &field, &state->recording, &state->recording.root_namespace);
-            
-            //TODO: automatically center this somehow, maybe make a CenterColumnLayout?
-            HorizontalSlider(page, &state->recording.curr_time, state->recording.min_time, state->recording.max_time,
-                             V2(Size(page->bounds).x - 60, 40), V2(20, 20));
-         
-         } else {
-            Label(page, "No field loaded", 20, BLACK);
-         }
-      } else {   
-         selector_open = true;
-      }
-   }
-}
-
 //TODO: icons for pages
 #define PageButton(...) _PageButton(GEN_UI_ID, __VA_ARGS__)
 void _PageButton(ui_id id, element *parent, char *name, DashboardPage page, DashboardState *state) {
@@ -663,7 +248,7 @@ void DrawUI(element *root, DashboardState *state) {
    element *page_tabs = RowPanel(root, Size(Size(root).x, page_tab_height));
    Background(page_tabs, dark_grey);
    PageButton(page_tabs, "Home", DashboardPage_Home, state);
-   
+   PageButton(page_tabs, "Auto", DashboardPage_Auto, state);
    PageButton(page_tabs, "Recordings", DashboardPage_Recordings, state);
    PageButton(page_tabs, "Robots", DashboardPage_Robots, state);
    PageButton(page_tabs, "Settings", DashboardPage_Settings, state);
@@ -671,7 +256,8 @@ void DrawUI(element *root, DashboardState *state) {
    element *page = ColumnPanel(root, RectMinMax(root->bounds.min + V2(0, status_bar_height + page_tab_height), root->bounds.max));
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
-      case DashboardPage_Recordings: DrawRecordings(page, state); break;
+      case DashboardPage_Auto: /*TODO: DrawAutoEditor() */ break;
+      case DashboardPage_Recordings: DrawRecordings(page, state->ncrr_files, &state->recording, &state->settings, &state->profiles); break;
       case DashboardPage_Robots: DrawProfiles(page, &state->profiles, state->ncrp_files); break;
       case DashboardPage_Settings: {
          v2 robot_size_ft = V2(2, 2);
