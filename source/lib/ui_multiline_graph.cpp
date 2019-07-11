@@ -38,7 +38,7 @@ struct LineGraph {
    f32 max_value;
    f32 min_value;
 
-   //NOTE: 0 means unitless, unit_id > 0 needs to be looked up in the units table
+   //NOTE: 0 means unitless, unit_id > 0 is graph->units[unit_id - 1]
    u32 unit_id;  
 };
 
@@ -95,7 +95,7 @@ void StepRangeIterator(LineGraphIterator *iter) {
 }
 
 struct MultiLineGraphData {
-   MemoryArena arena;
+   MemoryArena *arena;
    LineGraph *first;
    LineGraph *line_hash[64];
 
@@ -105,7 +105,7 @@ struct MultiLineGraphData {
    f32 abs_min_time;
    f32 abs_max_time;
 
-   // u32 unit_count;
+   u32 unit_count;
    UnitSettings units[32];
 
    bool automatic_max_time;
@@ -123,7 +123,7 @@ void ResetMultiLineGraph(MultiLineGraphData *data) {
    for(u32 i = 0; i < ArraySize(data->line_hash); i++) {
       data->line_hash[i] = NULL;
    }
-   Reset(&data->arena);
+   Reset(data->arena);
 
    data->automatic_max_time = true;
    data->min_time = F32_MAX;
@@ -139,7 +139,7 @@ void ResetMultiLineGraph(MultiLineGraphData *data) {
    data->time_window = 10;
 }
 
-MultiLineGraphData NewMultiLineGraph(MemoryArena arena) {
+MultiLineGraphData NewMultiLineGraph(MemoryArena *arena) {
    MultiLineGraphData result = {};
    result.arena = arena;
    ResetMultiLineGraph(&result);
@@ -158,8 +158,8 @@ f32 GetXFromTime(MultiLineGraphData *data, rect2 bounds, f32 time) {
 v2 GetPointFor(MultiLineGraphData *data, LineGraph *graph, rect2 bounds, GraphEntry entry) {
    f32 t = (entry.time - data->min_time) / (data->max_time - data->min_time);
    Assert(graph->unit_id < ArraySize(data->units));
-   f32 min_value = (graph->unit_id == 0) ? graph->min_value : data->units[graph->unit_id].min_value;
-   f32 max_value = (graph->unit_id == 0) ? graph->max_value : data->units[graph->unit_id].max_value;
+   f32 min_value = (graph->unit_id > 0) ? data->units[graph->unit_id - 1].min_value : graph->min_value;
+   f32 max_value = (graph->unit_id > 0) ? data->units[graph->unit_id - 1].max_value : graph->max_value;
    
    //NOTE: this should add %10 of unused space in each direction, makes the graph more readable
    f32 amplitude = (max_value - min_value) / 2;
@@ -375,8 +375,8 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
 
          if(highlight) {
             rect2 bounds = graph->bounds;
-            f32 min_value = (curr_graph->unit_id == 0) ? curr_graph->min_value : data->units[curr_graph->unit_id].min_value;
-            f32 max_value = (curr_graph->unit_id == 0) ? curr_graph->max_value : data->units[curr_graph->unit_id].max_value;
+            f32 min_value = (curr_graph->unit_id > 0) ? data->units[curr_graph->unit_id - 1].min_value : curr_graph->min_value;
+            f32 max_value = (curr_graph->unit_id > 0) ? data->units[curr_graph->unit_id - 1].max_value : curr_graph->max_value;
             f32 y = Size(bounds).y * (1 - ((0 - min_value) / (max_value - min_value)));
             Line(graph, BLACK, 2, V2(bounds.min.x, bounds.min.y + y), V2(bounds.max.x, bounds.min.y + y));
          }
@@ -420,7 +420,7 @@ element *_MultiLineGraph(ui_id id, element *parent, MultiLineGraphData *data,
          
          if(value_at.has_value) {
             string prefix = Literal(curr_graph->hidden ? "- " : "+ ");
-            string suffix = (curr_graph->unit_id == 0) ? Literal("") : data->units[curr_graph->unit_id].suffix;
+            string suffix = (curr_graph->unit_id > 0) ? data->units[curr_graph->unit_id - 1].suffix : Literal("");
             string text = Concat(prefix, curr_graph->name, Literal(" = "), ToString(value_at.value), suffix); 
             Label(graph, text, 20, BLACK);
 
@@ -468,20 +468,26 @@ element *_ImmutableMultiLineGraph(ui_id id, element *parent, MultiLineGraphData 
    return _MultiLineGraph(id, parent, data, size, padding, margin, true);  
 }
 
-//REMOVE----------------------
-//NOTE: the "suffix" string must exist for the entire lifetime of the graph
-void SetUnit(MultiLineGraphData *data, u32 unit_id, string suffix) {
-   Assert(unit_id < ArraySize(data->units));
-   data->units[unit_id].suffix = suffix;
+u32 GetOrCreateUnit(MultiLineGraphData *data, string suffix) {
+   u32 unit_id = 0;
+   for(u32 i = 0; i < data->unit_count; i++) {
+      if(data->units[i].suffix == suffix) {
+         unit_id = i;
+         break;
+      }
+   }
+
+   if((unit_id == 0) && (data->unit_count < ArraySize(data->units))) {
+      unit_id = data->unit_count + 1;
+      data->unit_count++;
+
+      data->units[unit_id - 1].suffix = PushCopy(data->arena, suffix);
+   }
+
+   return unit_id;
 }
-//----------------------------
 
-// u32 GetOrCreateUnit(MultiLineGraphData *data, string suffix) {
-//    for(u32 i = 0; i < )
-// }
-
-// void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 unit) {
-void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 unit_id) {
+void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, string unit) {
    bool first_entry = (data->first == NULL);
 
    u32 i = Hash(name) % ArraySize(data->line_hash);
@@ -495,22 +501,22 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
 
    bool graph_was_created = (graph == NULL);
    if(graph == NULL) {
-      if(!CanAllocate(&data->arena, sizeof(LineGraph) + name.length)) {
+      if(!CanAllocate(data->arena, sizeof(LineGraph) + name.length)) {
          data->cant_allocate_more_lines = true;
          return;
       }
       
-      graph = PushStruct(&data->arena, LineGraph);
+      graph = PushStruct(data->arena, LineGraph);
 
       graph->next = data->first;
       data->first = graph;
       graph->next_in_hash = data->line_hash[i];
       data->line_hash[i] = graph;
 
-      graph->name = PushCopy(&data->arena, name);
+      graph->name = PushCopy(data->arena, name);
       graph->hidden = false;
       graph->colour = V4(Random01(), Random01(), Random01(), 1);
-      graph->unit_id = unit_id;
+      graph->unit_id = GetOrCreateUnit(data, unit);
 
       graph->sentinel.next = &graph->sentinel;
       graph->oldest_entry_block = &graph->sentinel;
@@ -524,9 +530,6 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
       graph->min_value = F32_MAX;
    }
 
-   Assert(graph->unit_id < ArraySize(data->units));
-   Assert(graph->unit_id == unit_id);
-   
    Assert((graph->next_entry_block->next == graph->oldest_entry_block) || 
           (graph->next_entry_block == graph->oldest_entry_block));   
    
@@ -535,8 +538,8 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, u32 un
       //NOTE: if this fails, we didnt wrap properly
       Assert(graph->next_entry_block->next == graph->oldest_entry_block);   
       
-      if(CanAllocate(&data->arena, sizeof(GraphEntryBlock))) {
-         GraphEntryBlock *new_block = PushStruct(&data->arena, GraphEntryBlock);
+      if(CanAllocate(data->arena, sizeof(GraphEntryBlock))) {
+         GraphEntryBlock *new_block = PushStruct(data->arena, GraphEntryBlock);
          new_block->next = graph->oldest_entry_block;
          graph->next_entry_block->next = new_block;
 

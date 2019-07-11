@@ -187,14 +187,18 @@ AutoRobotPose lerp(AutoRobotPose a, f32 t, AutoRobotPose b) {
    return result;
 }
 
-void map_lerp_pose(InterpolatingMap_Leaf *leaf_a, InterpolatingMap_Leaf *leaf_b, 
-                   f32 t, void *in_result)
-{
-   AutoRobotPose *result = (AutoRobotPose *) in_result;
-   AutoRobotPose *a = (AutoRobotPose *) leaf_a->data_ptr;
-   AutoRobotPose *b = (AutoRobotPose *) leaf_b->data_ptr;
+// void map_lerp_pose(InterpolatingMap_Leaf *leaf_a, InterpolatingMap_Leaf *leaf_b, 
+//                    f32 t, void *in_result)
+// {
+//    AutoRobotPose *result = (AutoRobotPose *) in_result;
+//    AutoRobotPose *a = (AutoRobotPose *) leaf_a->data_ptr;
+//    AutoRobotPose *b = (AutoRobotPose *) leaf_b->data_ptr;
    
-   *result = lerp(*a, t, *b);
+//    *result = lerp(*a, t, *b);
+// }
+
+AutoRobotPose map_lerp_pose(AutoRobotPose a, AutoRobotPose b, f32 t) {
+   return lerp(a, t, b);
 }
 
 v2 CubicHermiteSpline(North_HermiteControlPoint a, North_HermiteControlPoint b, f32 t) {
@@ -211,16 +215,24 @@ struct AutoPathData {
    f32 d2theta_ds2;
 };
 
-void path_data_lerp(InterpolatingMap_Leaf *leaf_a, InterpolatingMap_Leaf *leaf_b, 
-                    f32 t, void *result_in)
-{
-   AutoPathData *result = (AutoPathData *) result_in;
-   AutoPathData *a = (AutoPathData *) leaf_a->data_ptr;
-   AutoPathData *b = (AutoPathData *) leaf_b->data_ptr;
+// void path_data_lerp(InterpolatingMap_Leaf *leaf_a, InterpolatingMap_Leaf *leaf_b, 
+//                     f32 t, void *result_in)
+// {
+//    AutoPathData *result = (AutoPathData *) result_in;
+//    AutoPathData *a = (AutoPathData *) leaf_a->data_ptr;
+//    AutoPathData *b = (AutoPathData *) leaf_b->data_ptr;
 
-   result->pose = lerp(a->pose, t, b->pose);
-   result->dtheta_ds = lerp(a->dtheta_ds, t, b->dtheta_ds);
-   result->d2theta_ds2 = lerp(a->d2theta_ds2, t, b->d2theta_ds2);
+//    result->pose = lerp(a->pose, t, b->pose);
+//    result->dtheta_ds = lerp(a->dtheta_ds, t, b->dtheta_ds);
+//    result->d2theta_ds2 = lerp(a->d2theta_ds2, t, b->d2theta_ds2);
+// }
+
+AutoPathData path_data_lerp(AutoPathData a, AutoPathData b, f32 t) {
+   AutoPathData result = {};
+   result.pose = lerp(a.pose, t, b.pose);
+   result.dtheta_ds = lerp(a.dtheta_ds, t, b.dtheta_ds);
+   result.d2theta_ds2 = lerp(a.d2theta_ds2, t, b.d2theta_ds2);
+   return result;
 }
 
 //TODO: FORMALIZE----------------------------------------------
@@ -229,8 +241,8 @@ f32 Angle(v2 v) {
 }
 //-------------------------------------------------------------
 
-f32 BuildPathMap(InterpolatingMap *len_to_data, North_HermiteControlPoint *points, u32 point_count) {
-   InterpolatingMapSamples samples = ResetMap(len_to_data);
+f32 BuildPathMap(InterpolatingMap<AutoPathData> *len_to_data, North_HermiteControlPoint *points, u32 point_count) {
+   InterpolatingMapSamples<AutoPathData> samples = ResetMap(len_to_data);
    f32 t_step = (f32)(point_count - 1) / (f32)(samples.count - 1);
    
    f32 length = 0;
@@ -240,36 +252,36 @@ f32 BuildPathMap(InterpolatingMap *len_to_data, North_HermiteControlPoint *point
       u32 spline_i = Clamp(0, point_count - 2, (u32) t_full);
       v2 pos = CubicHermiteSpline(points[spline_i], points[spline_i + 1], t_full - (f32)spline_i);
 
-      AutoPathData *data = PushStruct(samples.arena, AutoPathData);
-      data->pose.pos = pos;
-      data->pose.angle = ToRadians(Angle(CubicHermiteSplineTangent(points[spline_i], points[spline_i + 1], t_full - (f32)spline_i)));
+      AutoPathData data = {};
+      data.pose.pos = pos;
+      data.pose.angle = ToRadians(Angle(CubicHermiteSplineTangent(points[spline_i], points[spline_i + 1], t_full - (f32)spline_i)));
 
       length += Length(pos - last_pos);
       last_pos = pos;
       
       samples.data[i].len = length;
-      samples.data[i].data_ptr = data;
+      samples.data[i].data = data;
    }
 
    f32 ds = length / (f32)(samples.count - 1);
    for(u32 i = 0; i < samples.count; i++) {
-      AutoPathData *data = ((AutoPathData *) samples.data[i].data_ptr);
+      AutoPathData *data = &samples.data[i].data;
       AutoRobotPose curr_pose = data->pose;
 
       f32 dtheta_ds = 0;
       f32 d2theta_ds2 = 0;
 
       if(i == 0) {
-         AutoRobotPose next_pose = ((AutoPathData *) samples.data[i + 1].data_ptr)->pose;
+         AutoRobotPose next_pose = samples.data[i + 1].data.pose;
          dtheta_ds = ShortestAngleBetween_Radians(curr_pose.angle, next_pose.angle) / ds;
       } else {
-         AutoRobotPose last_pose = ((AutoPathData *) samples.data[i - 1].data_ptr)->pose;
+         AutoRobotPose last_pose = samples.data[i - 1].data.pose;
          dtheta_ds = ShortestAngleBetween_Radians(last_pose.angle, curr_pose.angle) / ds;
       }
 
       if((i != 0) && (i != samples.count - 1)) {
-         AutoRobotPose next_pose = ((AutoPathData *) samples.data[i + 1].data_ptr)->pose;
-         AutoRobotPose last_pose = ((AutoPathData *) samples.data[i - 1].data_ptr)->pose;
+         AutoRobotPose next_pose = samples.data[i + 1].data.pose;
+         AutoRobotPose last_pose = samples.data[i - 1].data.pose;
 
          d2theta_ds2 = (ShortestAngleBetween_Radians(curr_pose.angle, next_pose.angle) / ds - ShortestAngleBetween_Radians(last_pose.angle, curr_pose.angle) / ds) / ds;
       }
@@ -299,14 +311,13 @@ struct AutoPath {
    u32 control_point_count;
    North_HermiteControlPoint *control_points;
 
-   InterpolatingMap len_to_data;
+   InterpolatingMap<AutoPathData> len_to_data;
    f32 length;
 };
 
 void InitAutoPath(AutoPath *path) {
    //TODO: properly do this, BIG HACK
-   MemoryArena *arena = PlatformAllocArena(Megabyte(2) + sizeof(MemoryArenaBlock), "AutoPathHACK");
-   path->len_to_data.arena = PushArena(arena, Megabyte(2));
+   path->len_to_data.arena = PlatformAllocArena(Megabyte(2), "AutoPathHACK");
    path->len_to_data.sample_exp = 7;
    path->len_to_data.lerp_callback = path_data_lerp;
 }
@@ -383,8 +394,7 @@ void RecalculateAutoPath(AutoPath *path) {
 }
 
 AutoRobotPose GetAutoPathPose(AutoPath *path, f32 distance) {
-   AutoPathData data = {};
-   MapLookup(&path->len_to_data, distance, &data);
+   AutoPathData data = MapLookup(&path->len_to_data, distance);
    return data.pose;
 }
 
@@ -612,7 +622,7 @@ AutoPath *ParseAutoPath(buffer *file, MemoryArena *arena) {
 }
 
 AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
-   buffer file = ReadEntireFile(Concat(file_name, Literal(".ncap")));
+   buffer file = ReadEntireFile(file_name + ".ncap");
    if(file.data != NULL) {
       FileHeader *file_numbers = ConsumeStruct(&file, FileHeader);
       AutonomousProgram_FileHeader *header = ConsumeStruct(&file, AutonomousProgram_FileHeader);
@@ -627,27 +637,41 @@ AutoProjectLink *ReadAutoProject(string file_name, MemoryArena *arena) {
    return NULL;
 }
 
-void ReadProjectsStartingAt(AutoProjectList *list, u32 field_flags, v2 pos, RobotProfile *bot) {
+void ReadAllProjects(AutoProjectList *list) {
    Reset(list->arena);
    list->first = NULL;
 
    for(FileListLink *file = ListFilesWithExtension("*.ncap"); file; file = file->next) {
       AutoProjectLink *auto_proj = ReadAutoProject(file->name, list->arena);
-      if(auto_proj && IsProjectCompatible(auto_proj, bot)) {
-         //TODO: do reflecting and stuff in here
-         bool valid = false;
-
-         if(Length(auto_proj->starting_node->pos - pos) < 0.5) {
-            valid = true;
-         }
-
-         if(valid) {
-            auto_proj->next = list->first;
-            list->first = auto_proj;
-         }
+      if(auto_proj) {
+         auto_proj->next = list->first;
+         list->first = auto_proj;
       }
    }
 }
+
+//  ------------------TODO------------------
+// void ReadProjectsStartingAt(AutoProjectList *list, u32 field_flags, v2 pos, RobotProfile *bot) {
+//    Reset(list->arena);
+//    list->first = NULL;
+
+//    for(FileListLink *file = ListFilesWithExtension("*.ncap"); file; file = file->next) {
+//       AutoProjectLink *auto_proj = ReadAutoProject(file->name, list->arena);
+//       if(auto_proj && IsProjectCompatible(auto_proj, bot)) {
+//          //TODO: do reflecting and stuff in here
+//          bool valid = false;
+
+//          if(Length(auto_proj->starting_node->pos - pos) < 0.5) {
+//             valid = true;
+//          }
+
+//          if(valid) {
+//             auto_proj->next = list->first;
+//             list->first = auto_proj;
+//          }
+//       }
+//    }
+// }
 //FILE-READING----------------------------------------------
 
 //FILE-WRITING----------------------------------------------
@@ -775,4 +799,37 @@ void WriteProject(AutoProjectLink *project) {
 }
 //FILE-WRITING----------------------------------------------
 
-//TODO: AutoProjectLink to packet
+//NETWORKING------------------------------------------------
+buffer MakeSetStatePacket(v2 pos, f32 angle) {
+   buffer packet = PushTempBuffer(Kilobyte(5));
+
+   PacketHeader p_header = { sizeof(SetState_PacketHeader), (u8)PacketType::SetState };
+   WriteStruct(&packet, &p_header);
+   
+   SetState_PacketHeader header = {};
+   header.pos = pos;
+   header.angle = angle;
+   WriteStruct(&packet, &header);
+   
+   return packet;
+}
+
+buffer MakeUploadAutonomousPacket(AutoProjectLink *project) {
+   //TODO: this uses 10MB, make it more efficient
+   buffer data = PushTempBuffer(Megabyte(5));
+   WriteAutoNode(&data, project->starting_node);
+
+   //Write packet
+   buffer packet = PushTempBuffer(Megabyte(5));   
+   u32 size = sizeof(UploadAutonomous_PacketHeader) + data.offset;
+   PacketHeader p_header = { size, (u8)PacketType::UploadAutonomous };
+   WriteStruct(&packet, &p_header);
+   
+   UploadAutonomous_PacketHeader header = {};
+   header.starting_angle = project->starting_angle;
+   WriteStruct(&packet, &header);
+
+   WriteSize(&packet, data.data, data.offset);
+   return packet;
+}
+//NETWORKING------------------------------------------------

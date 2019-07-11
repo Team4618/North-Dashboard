@@ -266,6 +266,10 @@ struct openglContext {
    GLint texture_uniform;
 
    GLuint white_tex;
+
+   GLuint fbo_colour;
+   GLuint fbo;
+   GLuint blit_vertex_buffer;
 };
 
 struct ui_impl_win32_window {
@@ -273,6 +277,9 @@ struct ui_impl_win32_window {
    bool running;
    openglContext gl;
    v2 size;
+
+   u32 width;
+   u32 height;
 
    Timer frame_timer;
 
@@ -315,6 +322,25 @@ struct VertexData {
    v2 uv;
    v4 colour;
 };
+
+void resizeFramebuffer(openglContext *gl, u32 width, u32 height) {
+   glBindFramebuffer(GL_FRAMEBUFFER, gl->fbo);
+   
+   u32 num_samples = 8;
+   // glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, gl->fbo_colour);
+   // glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, num_samples, GL_RGBA8, width, height, false);   
+   // glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
+   
+   glBindTexture(GL_TEXTURE_2D, gl->fbo_colour);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+   glBindTexture(GL_TEXTURE_2D, gl->fbo_colour);
+
+   // glGenTextures(1, &gl->fbo_depth);
+   // glBindTexture(GL_TEXTURE_2D, gl->fbo_depth);
+   // glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, window->width, window->height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
+
+   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
 
 ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_WindowMessageEvent) {
    HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -458,8 +484,6 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    gl.texture_uniform = glGetUniformLocation(gl.shader, "Texture");
    //---------------------------
 
-   //TODO: create multisample framebuffer
-
    u32 white_texels[4] = {
       0xFFFFFFFF, 0xFFFFFFFF,
       0xFFFFFFFF, 0xFFFFFFFF
@@ -481,9 +505,40 @@ ui_impl_win32_window createWindow(char *title, WNDPROC window_proc = impl_Window
    glBindBuffer(GL_ARRAY_BUFFER, 0);
    //---------------------------
 
+   //---------------------------
+   glGenTextures(1, &gl.fbo_colour);
+   resizeFramebuffer(&gl, 1920, 1080);
+
+   glGenFramebuffers(1, &gl.fbo);
+   glBindFramebuffer(GL_FRAMEBUFFER, gl.fbo);
+   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D /*GL_TEXTURE_2D_MULTISAMPLE*/, gl.fbo_colour, 0);
+   // glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, gl->fbo_depth, 0);
+   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+   VertexData blit_vertices[] = {
+      { V2(-1, -1), V2(0, 0), V4(1, 1, 1, 1) },
+      { V2(-1, 1), V2(0, 1), V4(1, 1, 1, 1) }, 
+      { V2(1, 1), V2(1, 1), V4(1, 1, 1, 1) }, 
+      { V2(-1, -1), V2(0, 0), V4(1, 1, 1, 1) },  
+      { V2(1, -1), V2(1, 0), V4(1, 1, 1, 1) },
+      { V2(1, 1), V2(1, 1), V4(1, 1, 1, 1) }  
+   };
+   
+   glGenBuffers(1, &gl.blit_vertex_buffer);
+   glBindBuffer(GL_ARRAY_BUFFER, gl.blit_vertex_buffer);
+   glBufferData(GL_ARRAY_BUFFER, sizeof(blit_vertices), blit_vertices, GL_STATIC_DRAW);
+
+   // glVertexAttribPointer(POSITION_SLOT, 2, GL_FLOAT, GL_FALSE, sizeof(VertexData), (void*) offsetof(VertexData, pos));
+   // glVertexAttribPointer(UV_SLOT, 2, GL_FLOAT, GL_FALSE, sizeof(VertexData), (void*) offsetof(VertexData, uv));
+   // glVertexAttribPointer(COLOUR_SLOT, 4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (void*) offsetof(VertexData, colour));
+
+   glBindBuffer(GL_ARRAY_BUFFER, 0);
+   //---------------------------
+
    glEnable(GL_BLEND);
    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
    glEnable(GL_SCISSOR_TEST);
+   glDisable(GL_DEPTH_TEST);
 
    DragAcceptFiles(window, true);
    RegisterTouchWindow(window, 0);
@@ -891,6 +946,10 @@ bool PumpMessages(ui_impl_win32_window *window, UIContext *ui) {
       window->size = V2(client_rect.right, client_rect.bottom);
       glViewport(0, 0, window->size.x, window->size.y);
       wm_size_recieved = false;
+
+      window->width = client_rect.right;
+      window->height = client_rect.bottom;
+      resizeFramebuffer(&window->gl, window->width, window->height);
    }
 
    return window->running;
@@ -1146,8 +1205,6 @@ void endFrame(ui_impl_win32_window *window, element *root, f32 max_fps = 60) {
    context->filedrop_count = 0;
    context->filedrop_names = NULL;
    
-   element *debug_root = DrawDebugView(window, context, input, max_fps);
-
    //Batch
    RenderContext rctx = {};
    rctx.arena = context->frame_arena;
@@ -1155,12 +1212,17 @@ void endFrame(ui_impl_win32_window *window, element *root, f32 max_fps = 60) {
 
    RunElement(&rctx, root);
    BatchRenderCommandBuffer(&rctx, context->overlay->first_command, context->overlay->cliprect);
+   
+   //NOTE: call DrawDebugView after RunElement for the main ui
+   element *debug_root = DrawDebugView(window, context, input, max_fps);
    RunElement(&rctx, debug_root);
 
-   //Render
+   //Render to MSAA
+   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+   // glBindFramebuffer(GL_FRAMEBUFFER, window->gl.fbo);
    glScissor(0, 0, window->size.x, window->size.y);
    glClearColor(1, 1, 1, 1);
-   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+   glClear(GL_COLOR_BUFFER_BIT /*| GL_DEPTH_BUFFER_BIT*/);
 
    mat4 transform = Orthographic(0, window->size.y, 0, window->size.x, 100, -100);
    glUseProgram(window->gl.shader);
@@ -1175,6 +1237,25 @@ void endFrame(ui_impl_win32_window *window, element *root, f32 max_fps = 60) {
    for(RenderBatch *batch = rctx.first_batch; batch; batch = batch->next) {
       DrawBatch(batch, window);
    }
+
+   //Blit from MSAA to window
+   // glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+   // glClearColor(1, 1, 1, 1); xxx
+   // glClear(GL_COLOR_BUFFER_BIT /*| GL_DEPTH_BUFFER_BIT*/); xxx
+   // glBindFramebuffer(GL_READ_FRAMEBUFFER, window->gl.fbo);
+   // glDrawBuffer(GL_BACK);
+   // glBlitFramebuffer(0, 0, window->width, window->height, 0, 0, window->width, window->height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+   
+   // glBindFramebuffer(GL_FRAMEBUFFER, 0);
+   // glClearColor(1, 1, 1, 1);
+   // glClear(GL_COLOR_BUFFER_BIT /*| GL_DEPTH_BUFFER_BIT*/);
+
+   // mat4 identity_mat = Identity();
+   // glUniformMatrix4fv(window->gl.matrix_uniform, 1, GL_FALSE, identity_mat.e);
+   // glBindBuffer(GL_ARRAY_BUFFER, window->gl.blit_vertex_buffer);
+   // glScissor(0, 0, window->size.x, window->size.y);
+   // glBindTexture(GL_TEXTURE_2D, window->gl.fbo_colour);
+   // glDrawArrays(GL_TRIANGLES, 0, 6);
 
    SwapBuffers(window->gl.dc);
 

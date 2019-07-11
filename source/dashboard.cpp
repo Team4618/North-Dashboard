@@ -10,6 +10,7 @@
 #include "north_shared/auto_project_utils.cpp"
 
 #include "dashboard_live_view.cpp"
+#include "auto_editor/auto_editor.cpp"
 
 enum DashboardPage {
    DashboardPage_Home,
@@ -22,14 +23,17 @@ enum DashboardPage {
 struct DashboardState {
    ConnectedState connected;
 
-   NorthSettings settings;
-   RobotProfiles profiles;
-   
-   LoadedRobotRecording recording;
-   RobotRecorder auto_recorder;
-   RobotRecorder manual_recorder;
+   //TODO: clean this stuff up
+      NorthSettings settings;
+      RobotProfiles profiles;
+      
+      LoadedRobotRecording recording;
+      RobotRecorder auto_recorder;
+      RobotRecorder manual_recorder;
 
-   AutoProjectList auto_programs;
+      AutoProjectList auto_programs;
+
+      EditorState editor;
 
    //--------------------------------------------------------
    DashboardPage page;
@@ -44,6 +48,7 @@ struct DashboardState {
    FileListLink *ncff_files; //Field 
    FileListLink *ncrr_files; //Recording
    FileListLink *ncrp_files; //Robot Profile
+   // FileListLink *ncap_files; //Auto Programs
    FileWatcher file_watcher;
    
    f32 curr_time;
@@ -54,8 +59,10 @@ void reloadFiles(DashboardState *state) {
    state->ncff_files = ListFilesWithExtension("*.ncff", state->file_lists_arena);
    state->ncrr_files = ListFilesWithExtension("*.ncrr", state->file_lists_arena);
    state->ncrp_files = ListFilesWithExtension("*.ncrp", state->file_lists_arena);
+   // state->ncap_files = ListFilesWithExtension("*.ncap", state->file_lists_arena);
 
    ReadSettingsFile(&state->settings);
+   ReadAllProjects(&state->editor.auto_programs);
 }
 
 void initDashboard(DashboardState *state) {
@@ -74,6 +81,7 @@ void initDashboard(DashboardState *state) {
    state->page = DashboardPage_Home;
    
    InitFileWatcher(&state->file_watcher, PlatformAllocArena(Kilobyte(512), "File Watcher"), "*.*");
+   initEditor(&state->editor);
 }
 
 void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path, bool preview);
@@ -238,6 +246,8 @@ void DrawUI(element *root, DashboardState *state) {
    Background(status_bar, dark_grey);
    if(state->profiles.current.state == RobotProfileState::Connected) {
       Label(status_bar, state->profiles.current.name, 20, WHITE, V2(10, 0));
+      
+      //TODO: print the message at "status"
       // Label(status_bar, Concat(Literal("Mode: "), ToString(state->connected.mode)), 20, WHITE, V2(10, 0));
    } else if(state->profiles.current.state == RobotProfileState::Loaded) {
       Label(status_bar, Concat(state->profiles.current.name, Literal(" (loaded from file)")), 20, WHITE, V2(10, 0));
@@ -256,7 +266,7 @@ void DrawUI(element *root, DashboardState *state) {
    element *page = ColumnPanel(root, RectMinMax(root->bounds.min + V2(0, status_bar_height + page_tab_height), root->bounds.max));
    switch(state->page) {
       case DashboardPage_Home: DrawHome(page, state); break;
-      case DashboardPage_Auto: /*TODO: DrawAutoEditor() */ break;
+      case DashboardPage_Auto: DrawAutoEditor(page, &state->editor, &state->settings, &state->profiles.current); break;
       case DashboardPage_Recordings: DrawRecordings(page, state->ncrr_files, &state->recording, &state->settings, &state->profiles); break;
       case DashboardPage_Robots: DrawProfiles(page, &state->profiles, state->ncrp_files); break;
       case DashboardPage_Settings: {

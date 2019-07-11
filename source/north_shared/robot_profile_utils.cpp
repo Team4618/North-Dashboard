@@ -129,11 +129,21 @@ RobotProfileParameter *GetOrCreateParameter(RobotProfile *profile, string name) 
 }
 
 string GetFullName(RobotProfileNamespace *ns) {
-   return (ns->parent == NULL) ? EMPTY_STRING : Concat(GetFullName(ns->parent), Literal("/"), ns->name);
+   string name = (ns->parent == NULL) ? EMPTY_STRING : (GetFullName(ns->parent) + "/" + ns->name);
+   if((name.length > 0) && (name.text[0] == '/')) {
+      name.text++;
+      name.length--;
+   }
+   return name;
 }
 
 string GetFullName(RobotProfileParameter *param) {
-   return Concat(GetFullName(param->parent), Literal("/"), param->name);
+   string name = GetFullName(param->parent) + "/" + param->name;
+   if((name.length > 0) && (name.text[0] == '/')) {
+      name.text++;
+      name.length--;
+   }
+   return name;
 }
 
 RobotProfileCommand *GetCommand(RobotProfile *profile, string name) {
@@ -350,19 +360,20 @@ void LoadProfileFile(RobotProfile *profile, string file_name) {
 buffer MakeParamOpPacket(RobotProfileParameter *param, ParameterOp_Type::type type, f32 value, u32 index) {
    buffer packet = PushTempBuffer(Kilobyte(10));
 
-   u32 size = sizeof(ParameterOp_PacketHeader) + param->name.length;
+   string name = GetFullName(param);
+   u32 size = sizeof(ParameterOp_PacketHeader) + name.length;
    PacketHeader p_header = { size, (u8)PacketType::ParameterOp };
 
    ParameterOp_PacketHeader header = {};
    header.type = (u8) type;
-   header.param_name_length = param->name.length;
+   header.param_name_length = name.length;
 
    header.value = value;
    header.index = index;
 
    WriteStruct(&packet, &p_header);
    WriteStruct(&packet, &header);
-   WriteString(&packet, param->name);
+   WriteString(&packet, name);
 
    return packet;
 }

@@ -282,16 +282,16 @@ void EndTemp(MemoryArena *temp) {
 #define PushArray(arena, struct, length) (struct *) PushSize(arena, (length) * sizeof(struct))
 #define PushArrayCopy(arena, struct, first_elem, length) (struct *) PushCopy(arena, first_elem, length * sizeof(struct))
 
-MemoryArena PushArena(MemoryArena *arena, u64 size) {
+MemoryArena *PushArena(MemoryArena *arena, u64 size) {
    MemoryArenaBlock *block = PushStruct(arena, MemoryArenaBlock);
    block->size = size;
    block->memory = PushSize(arena, size);
    
-   MemoryArena result = {};
-   result.initial_size = size;
-   result.first_block = block;
-   result.curr_block = block;
-   result.valid = true;
+   MemoryArena *result = PushStruct(arena, MemoryArena);
+   result->initial_size = size;
+   result->first_block = block;
+   result->curr_block = block;
+   result->valid = true;
    
    return result;
 }
@@ -426,13 +426,13 @@ MemoryArenaBlock *PushTempBlock(u64 size) {
    return result;
 }
 
-MemoryArena PushTempArena(u32 size) {
-   MemoryArena result = {};
-   result.first_block = PushTempBlock(size);
-   result.curr_block = result.first_block;
-   result.initial_size = size;
-   result.valid = true;
-   result.alloc_block = PushTempBlock;
+MemoryArena *PushTempArena(u32 size) {
+   MemoryArena *result = PushTempStruct(MemoryArena);
+   result->first_block = PushTempBlock(size);
+   result->curr_block = result->first_block;
+   result->initial_size = size;
+   result->valid = true;
+   result->alloc_block = PushTempBlock;
    return result;
 }
 
@@ -672,6 +672,13 @@ v4 lerp(v4 a, f32 t, v4 b) {
              lerp(a.a, t, b.a));
 }
 
+u32 PackColourRGBA(v4 rgba) {
+   return ((u32)(0xFF * rgba.r) << 0) | 
+          ((u32)(0xFF * rgba.g) << 8) |
+          ((u32)(0xFF * rgba.b) << 16) |
+          ((u32)(0xFF * rgba.a) << 24);
+}
+
 union v2 {
    struct { f32 u, v; };
    struct { f32 x, y; };
@@ -801,6 +808,13 @@ v2 Midpoint(v2 a, v2 b) {
 f32 DistFromLine(v2 a, v2 b, v2 p) {
    f32 num = (a.y - b.y) * p.x - (a.x - b.x) * p.y + a.x*b.y - a.y*b.x;
    return abs(num) / sqrtf((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+}
+
+v2 ClosestPointOnLine(v2 a, v2 b, v2 p) {
+   v2 line_p0 = a;
+   v2 line_d = b - a;
+   f32 t = (Dot(p, line_d) - Dot(line_p0, line_d)) / Dot(line_d, line_d);
+   return line_p0 + t * line_d;
 }
 
 v2 CubicHermiteSpline(v2 a_pos, v2 a_tan, v2 b_pos, v2 b_tan, f32 t) {
@@ -1055,7 +1069,7 @@ mat4 Rotation(v3 u, f32 t) {
 
 //----------------------------------------------
 //TODO: do we want to keep this here?
-#if 1
+#if 0
 struct InterpolatingMap_Leaf {
    f32 len;
    
@@ -1088,7 +1102,7 @@ struct InterpolatingMap_Branch {
 typedef void (*interpolation_map_callback)(InterpolatingMap_Leaf *a, InterpolatingMap_Leaf *b, f32 t, void *result);
 
 struct InterpolatingMap {
-   MemoryArena arena;
+   MemoryArena *arena;
    u32 sample_exp;
    interpolation_map_callback lerp_callback;
 
@@ -1104,7 +1118,7 @@ struct InterpolatingMapSamples {
 };
 
 InterpolatingMapSamples ResetMap(InterpolatingMap *map) {
-   MemoryArena *arena = &map->arena;
+   MemoryArena *arena = map->arena;
    Reset(arena);
 
    u32 sample_count = Power(2, map->sample_exp); 
@@ -1116,7 +1130,7 @@ InterpolatingMapSamples ResetMap(InterpolatingMap *map) {
 }
 
 void BuildMap(InterpolatingMap *map) {
-   MemoryArena *arena = &map->arena;
+   MemoryArena *arena = map->arena;
 
    u32 last_layer_count = Power(2, map->sample_exp - 1);
    InterpolatingMap_Branch *last_layer = PushArray(arena, InterpolatingMap_Branch, last_layer_count);
@@ -1186,6 +1200,138 @@ void MapLookup(InterpolatingMap *map, f32 distance, void *result) {
 
 void interpolation_map_v2_lerp(InterpolatingMap_Leaf *a, InterpolatingMap_Leaf *b, f32 t, void *result) {
    *((v2 *)result) = lerp(a->data_v2, t, b->data_v2);
+}
+#else
+template <typename T> 
+struct InterpolatingMap {
+   typedef T (*InterpolatingMapCallback) (T a, T b, f32 t);
+   
+   struct Leaf {
+      f32 len;
+      T data;
+   };
+
+   struct Branch {
+      f32 len;
+
+      f32 greater_value;
+      f32 less_value;
+      
+      union {
+         struct {
+            u32 greater_leaf;
+            u32 less_leaf;
+         };
+
+         struct {
+            Branch *greater_branch;
+            Branch *less_branch;
+         };
+      };
+   };
+   
+   MemoryArena *arena;
+   u32 sample_exp;
+   InterpolatingMapCallback lerp_callback;
+
+   Branch *root;
+   Branch **layers; //NOTE: has sample_exp arrays/layers in it
+   Leaf *samples;
+};
+
+template <typename T>
+struct InterpolatingMapSamples {
+   u32 count;
+   typename InterpolatingMap<T>::Leaf *data;
+   MemoryArena *arena;
+};
+
+template <typename T>
+InterpolatingMapSamples<T> ResetMap(InterpolatingMap<T> *map) {
+   MemoryArena *arena = map->arena;
+   Reset(arena);
+
+   u32 sample_count = Power(2, map->sample_exp); 
+   InterpolatingMap<T>::Leaf *samples = PushArray(arena, InterpolatingMap<T>::Leaf, sample_count);
+   map->samples = samples;
+
+   InterpolatingMapSamples<T> result = { sample_count, samples, arena };
+   return result;
+}
+
+template <typename T>
+void BuildMap(InterpolatingMap<T> *map) {
+   MemoryArena *arena = map->arena;
+
+   u32 last_layer_count = Power(2, map->sample_exp - 1);
+   auto *last_layer = PushArray(arena, InterpolatingMap<T>::Branch, last_layer_count);
+   for(u32 i = 0; i < last_layer_count; i++) {
+      auto *less = map->samples + (2 * i);
+      auto *greater = map->samples + (2 * i + 1);
+
+      last_layer[i].less_leaf = 2 * i;
+      last_layer[i].less_value = less->len;
+      last_layer[i].greater_leaf = 2 * i + 1;
+      last_layer[i].greater_value = greater->len;
+      last_layer[i].len = (less->len + greater->len) / 2;
+   }
+   
+   u32 debug_layer_i = 0;
+   map->layers = PushArray(arena, InterpolatingMap<T>::Branch *, map->sample_exp);
+   map->layers[debug_layer_i++] = last_layer;
+
+   for(u32 i = 1; i < map->sample_exp; i++) {
+      u32 layer_count = Power(2, map->sample_exp - i - 1);
+      auto *curr_layer = PushArray(arena, InterpolatingMap<T>::Branch, layer_count);
+
+      for(u32 i = 0; i < layer_count; i++) {
+         auto *less = last_layer + (2 * i);
+         auto *greater = last_layer + (2 * i + 1);
+
+         curr_layer[i].less_branch = less;
+         curr_layer[i].less_value = less->less_value;
+         curr_layer[i].greater_branch = greater;
+         curr_layer[i].greater_value = greater->greater_value;
+         curr_layer[i].len = (less->greater_value + greater->less_value) / 2;
+      }
+
+      last_layer_count = layer_count;
+      last_layer = curr_layer;
+      map->layers[debug_layer_i++] = last_layer;
+   }
+
+   map->root = last_layer;
+}
+
+template <typename T>
+T MapLookup(InterpolatingMap<T> *map, f32 distance) {
+   u32 sample_count = Power(2, map->sample_exp);
+   auto *branch = map->root;
+   for(u32 i = 0; i < (map->sample_exp - 1); i++) {
+      branch = (distance > branch->len) ? branch->greater_branch : branch->less_branch;
+   }
+
+   u32 a_i;
+   u32 b_i;
+
+   u32 center_leaf_i = (distance > branch->len) ? branch->greater_leaf : branch->less_leaf;
+   if(distance > map->samples[center_leaf_i].len) {
+      a_i = Clamp(0, sample_count - 1, center_leaf_i);
+      b_i = Clamp(0, sample_count - 1, center_leaf_i + 1);
+   } else {
+      a_i = Clamp(0, sample_count - 1, center_leaf_i - 1);
+      b_i = Clamp(0, sample_count - 1, center_leaf_i);
+   }
+
+   auto *leaf_a = map->samples + a_i;
+   auto *leaf_b = map->samples + b_i;
+
+   f32 t = (distance - leaf_a->len) / (leaf_b->len - leaf_a->len); 
+   return map->lerp_callback(leaf_a->data, leaf_b->data, t);
+}
+
+v2 interpolation_map_v2_lerp(v2 a, v2 b, f32 t) {
+   return lerp(a, t, b);
 }
 #endif
 //----------------------------------------------

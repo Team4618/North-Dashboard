@@ -237,7 +237,8 @@ void DrawSettings(element *full_page, NorthSettings *state,
    StaticTextBoxData(new_field_name, 15);
    static texture image_preview = {};
    static string image_path = {};
-   static v2 image_size = V2(0, 0);    
+   static v2 image_size = V2(0, 0);
+   static v4 picked_colour = V4(0.7, 1, 1, 1);
 
    if(curr_page == SettingsPage_Main) {
       ui_button save_button = Button(top_panel, "Save", menu_button.IsEnabled(DifferentThanSaved(state))); 
@@ -344,15 +345,25 @@ void DrawSettings(element *full_page, NorthSettings *state,
       
       bool valid = (GetText(name_box).length > 0) &&
                    width_box.valid && (new_field_width > 0) &&
-                   height_box.valid && (new_field_height > 0) &&
-                   (image_path.length > 0) && (image_preview.handle != 0);
+                   height_box.valid && (new_field_height > 0);
       
       if(Button(top_panel, "Create", menu_button.IsEnabled(valid)).clicked) {
-         image background_img = ReadImage(image_path);
-         WriteNewFieldFile(GetText(name_box), new_field_width,
-                           new_field_height, background_img);
-         FreeImage(&background_img);
-
+         bool has_background_image = (image_preview.handle != 0) && (image_path.length > 0);
+         if(has_background_image) {
+            image background_img = ReadImage(image_path);
+            WriteNewFieldFile(GetText(name_box), new_field_width,
+                              new_field_height, background_img);
+            FreeImage(&background_img);
+         } else {
+            u32 texels[] = {
+               PackColourRGBA(picked_colour), PackColourRGBA(picked_colour), 
+               PackColourRGBA(picked_colour), PackColourRGBA(picked_colour)
+            };
+            image solid_colour = { texels, 2, 2, true };
+            WriteNewFieldFile(GetText(name_box), new_field_width,
+                              new_field_height, solid_colour);
+         }
+         
          curr_page = SettingsPage_Main;
       }
 
@@ -377,10 +388,16 @@ void DrawSettings(element *full_page, NorthSettings *state,
          FreeImage(&new_field_img);
       }
 
-      //TODO: colour picker
-
       if(image_preview.handle == 0) { 
-         Label(image_drop, "Drop Field Image File Here", Size(image_drop), 40, off_white);
+         //TODO: colour picker
+         element *colour_picker = ColumnPanel(image_drop, Size(Size(image_drop) - V2(0, 40)));
+         element *curr_colour_display = Panel(colour_picker, Size(Size(image_drop).x, 40));
+         Background(curr_colour_display, picked_colour);
+         HorizontalSlider(colour_picker, &picked_colour.r, 0, 1, V2(Size(image_drop).x - 20, 40), V2(10, 10));
+         HorizontalSlider(colour_picker, &picked_colour.g, 0, 1, V2(Size(image_drop).x - 20, 40), V2(10, 10));
+         HorizontalSlider(colour_picker, &picked_colour.b, 0, 1, V2(Size(image_drop).x - 20, 40), V2(10, 10));
+
+         Label(image_drop, "Drop Field Image File Here", V2(Size(image_drop).x, 40) ,40, off_white);
       } else {
          Texture(image_drop, image_preview, RectCenterSize(Center(image_drop), AspectRatio(image_size, Size(image_drop))));
       }

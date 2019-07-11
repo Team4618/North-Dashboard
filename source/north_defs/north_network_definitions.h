@@ -70,113 +70,6 @@ struct Welcome_PacketHeader {
 };
 //-----------------------------------------
 
-#if 0
-//-----------------------------------------
-struct CurrentParameters_Parameter {
-   u8 is_array;
-   u8 name_length;
-   u8 value_count; //Ignored if is_array is false
-   //char name[name_length]
-   //f32 [value_count]
-};
-
-struct CurrentParameters_Group {
-   u8 name_length;
-   u8 param_count;
-   //char name[name_length]
-   //CurrentParameters_Parameter [param_count]
-};
-
-struct CurrentParameters_PacketHeader {
-   u8 group_count;
-   //CurrentParameters_Group default_group
-   //CurrentParameters_Group [group_count]
-};
-//----------------------------------------
-
-//-----------------------------------------
-struct State_Diagnostic {
-   u8 name_length;
-   f32 value;
-   u8 unit; //NOTE: North_Unit
-   //char name[name_length]
-};
-
-struct State_Message {
-   u8 type; //NOTE: North_MessageType
-   u16 length;
-   //char message[length]
-};
-
-struct State_Marker {
-   v2 pos;
-   u16 length;
-   //char message[length]
-};
-
-struct State_Path {
-   u16 length;
-   u8 control_point_count;
-   //char message[length]
-   //North_HermiteControlPoint [control_point_count]
-};
-
-struct State_Group {
-   u8 name_length;
-   
-   u8 diagnostic_count;
-   u8 message_count;
-   u8 marker_count;
-   u8 path_count;
-   
-   //char name[name_length]
-
-   //State_Diagnostic [diagnostic_count]
-   //State_Message [message_count]
-   //State_Marker [marker_count]
-   //State_Path [path_count]
-};
-
-struct State_PacketHeader {
-   v2 pos;
-   f32 angle;
-   
-   u8 mode; //NOTE: North_GameMode
-
-   u8 group_count;
-   f32 time;
-   
-   //NOTE: default_group.name_length should always be 0
-   //State_Group default_group;
-
-   //State_Group [group_count]
-};
-//-----------------------------------------
-
-//--------------------------------------
-namespace ParameterOp_Type {
-   enum type {
-      SetValue = 1, //NOTE: for is_array = false
-      AddValue = 2, //NOTE: for is_array = true
-      RemoveValue = 3, //NOTE: for is_array = true
-   };
-};
-
-struct ParameterOp_PacketHeader {
-   u8 type;
-   u8 group_name_length;
-   u8 param_name_length;
-
-   f32 value; //NOTE: only used by SetValue & AddValue
-   u32 index; //NOTE: ignored if is_array = false
-   
-   //char [group_name_length]
-   //char [param_name_length]
-};
-//--------------------------------------
-
-#else
-
 //-----------------------------------------
 struct CurrentParameters_Parameter {
    u8 is_array;
@@ -254,7 +147,6 @@ struct ParameterOp_PacketHeader {
    //char [param_name_length]
 };
 //-----------------------------------------
-#endif
 
 struct SetState_PacketHeader {
    v2 pos;
@@ -262,75 +154,9 @@ struct SetState_PacketHeader {
 };
 
 //-------------------------------------
-#if 0
-struct UploadAutonomous_DataPoint {
-   f32 distance;
-   f32 value;
-};
-
-struct UploadAutonomous_ContinuousEvent {
-   u8 subsystem_name_length;
-   u8 command_name_length;
-   u8 datapoint_count;
-   //char [subsystem_name_length]
-   //char [command_name_length]
-   //UploadAutonomous_DataPoint [datapoint_count]
-};
-
-struct UploadAutonomous_DiscreteEvent {
-   f32 distance;
-   u8 subsystem_name_length;
-   u8 command_name_length;
-   u8 parameter_count;
-   //char [subsystem_name_length]
-   //char [command_name_length]
-   //f32 [parameter_count]
-};
-
-//TODO: change over to cubic hermite splines
-//TODO: events during the initial turn?
-struct UploadAutonomous_Path {
-   u8 is_reverse;
-   f32 accel;
-   f32 deccel;
-   f32 max_vel;
-
-   //NOTE: begin & end points are parent.pos & end_node.pos
-   u8 conditional_length; //NOTE: if conditional_length is 0, there is no conditional
-   u8 control_point_count;
-
-   u8 continuous_event_count;
-   u8 discrete_event_count;
-
-   //char conditional_name [conditional_length]
-   //v2 [control_point_count]
-   //UploadAutonomous_ContinuousEvent [continuous_event_count]
-   //UploadAutonomous_DiscreteEvent [discrete_event_count]
-
-   //UploadAutonomous_Node end_node
-};
-
-struct UploadAutonomous_Command {
-   u8 subsystem_name_length;
-   u8 command_name_length;
-   u8 parameter_count;
-   //char [subsystem_name_length]
-   //char [command_name_length]
-   //f32 [parameter_count]
-};
-
-struct UploadAutonomous_Node {
-   v2 pos;
-   u8 command_count;
-   u8 path_count;
-   //UploadAutonomous_Command [command_count]
-   //UploadAutonomous_Path [path_count]
-};
-
 struct UploadAutonomous_PacketHeader {
-   
-   //UploadAutonomous_Node begining_node
+   f32 starting_angle;
+   //AutonomousProgram_Node begining_node //NOTE: AutonomousProgram_Node is in north_file_definitions.h
 };
-#endif
 
 #pragma pack(pop)

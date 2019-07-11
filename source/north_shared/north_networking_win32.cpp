@@ -133,7 +133,7 @@ bool HasPackets(f32 curr_time, PacketHeader *header, buffer *packet) {
       *header = *PeekStruct(&buf, PacketHeader);
       u32 total_size = sizeof(PacketHeader) + header->size;
 
-      //--------------------------
+#if 0
       if(Remaining(buf) >= total_size) {
          sent_packet_count++;
       } else {
@@ -143,7 +143,7 @@ bool HasPackets(f32 curr_time, PacketHeader *header, buffer *packet) {
       if((header->type > 4) || (header->type == 0)) {
          int test = 12;
       }
-      //--------------------------
+#endif
 
       if(Remaining(buf) >= total_size) {
          *packet = Buffer(total_size, PushCopy(__temp_arena, 

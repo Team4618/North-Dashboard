@@ -89,3 +89,21 @@ void DrawRobot(ui_field_topdown *field, v2 size,
    Loop(field->e, colour, 3, GetPoint(field, a), GetPoint(field, b), GetPoint(field, c), GetPoint(field, d));
    Line(field->e, colour, 3, GetPoint(field, pos), GetPoint(field, pos + heading*0.5*size.y));
 }
+
+//TODO: 3d field view --------------------------------------
+/*
+struct ui_field { 
+   element *e;
+   bool clicked;
+
+   mat4 camera;
+};
+
+??
+void DrawTriangles(ui_field *field, v3 *vertices, v4 *colours, u32 triangle_count) {
+
+}
+
+//TODO: how do we implement the auto editor in 3d?
+
+*/

@@ -29,6 +29,14 @@ struct ConnectedNamespace {
    ConnectedEntry *first_entry;
 };
 
+struct ConnectedLiveGraph {
+   ConnectedLiveGraph *next;
+
+   MultiLineGraphData graph;
+   // u32 selected_entry_count;
+   //TODO: array of strings?
+};
+
 struct ConnectedState {
    //NOTE: both owned by ConnectedState
    MemoryArena *persistent_arena;
@@ -39,6 +47,7 @@ struct ConnectedState {
    ConnectedNamespace root_namespace;
 
    //TODO: graphs
+   // ConnectedLiveGraph *first_graph;
 };
 
 void ResetConnectedState(ConnectedState *state) {
@@ -49,7 +58,7 @@ void ResetConnectedState(ConnectedState *state) {
    ZeroStruct(&state->root_namespace);
 }
 
-ConnectedEntry *GetOrCreateEntry(ConnectedState *state, string name) {
+ConnectedEntry *GetOrCreateEntry(ConnectedState *state, string name, bool create = true) {
    MemoryArena *arena = state->persistent_arena;
    SplitString path = split(name, '/');
    Assert(path.part_count > 0);
@@ -68,6 +77,9 @@ ConnectedEntry *GetOrCreateEntry(ConnectedState *state, string name) {
       }
 
       if(!found) {
+         if(!create)
+            return NULL;
+
          ConnectedNamespace *new_ns = PushStruct(arena, ConnectedNamespace);
          new_ns->name = PushCopy(arena, ns_name);
          new_ns->next = curr_namespace->first_child;
@@ -86,7 +98,7 @@ ConnectedEntry *GetOrCreateEntry(ConnectedState *state, string name) {
       }
    }
 
-   if(result == NULL) {
+   if((result == NULL) && create) {
       result = PushStruct(arena, ConnectedEntry);
       result->name = PushCopy(arena, rec_name);
       
@@ -96,6 +108,10 @@ ConnectedEntry *GetOrCreateEntry(ConnectedState *state, string name) {
 
    return result;
 }
+
+ConnectedEntry *GetEntry(ConnectedState *state, string name) {
+   return GetOrCreateEntry(state, name, false);
+} 
 
 void ClearNamespace(ConnectedNamespace *ns) {
    for(ConnectedEntry *entry = ns->first_entry; entry; entry = entry->next) {
@@ -251,7 +267,7 @@ void DrawLiveNamespace(element *page, ui_field_topdown *field, ConnectedState *s
    for(ConnectedEntry *entry = ns->first_entry; entry; entry = entry->next) {
       draw_live_entry_callback draw_func = getLiveEntryDrawer(entry->type);
       if(entry->has_data && draw_func) {
-         draw_func(page, field, state, entry);
+         draw_func(child_page, field, state, entry);
       }
    }
    
