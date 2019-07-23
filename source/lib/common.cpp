@@ -840,12 +840,32 @@ v3 V3(f32 x, f32 y, f32 z) {
    return result;
 }
 
+v3 operator+ (v3 a, v3 b) {
+	v3 output = {};
+	output.x = a.x + b.x;
+	output.y = a.y + b.y;
+   output.z = a.z + b.z;
+	return output;
+}
+
 v3 operator/ (v3 v, f32 s) {
 	v3 output = {};
 	output.x = v.x / s;
 	output.y = v.y / s;
    output.z = v.z / s;
 	return output;
+}
+
+v3 operator* (v3 v, f32 s) {
+	v3 output = {};
+	output.x = v.x * s;
+	output.y = v.y * s;
+   output.z = v.z * s;
+	return output;
+}
+
+v3 operator* (f32 s, v3 v) {
+   return v * s;
 }
 
 f32 Length(v3 a) { 

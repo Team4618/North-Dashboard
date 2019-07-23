@@ -739,6 +739,22 @@ void BatchRenderCommandBuffer(RenderContext *ctx, RenderCommand *first_command, 
 
             cmd->vertex_count += vert_count;
          } break;
+
+         case RenderCommand_Triangles: {
+            //TODO: use command->drawTriangles.tex
+            DrawCommand *cmd = GetOrCreateCommand(ctx, ctx->white_tex, scissor, command->drawTriangles.vert_count);
+            RenderBatch *batch = ctx->curr_batch;
+
+            for(u32 i = 0; i < command->drawTriangles.vert_count; i++) {
+               //TODO: 3d support?
+               v2 pos = V2(command->drawTriangles.pos[i].x, command->drawTriangles.pos[i].y);
+
+               VertexData v1 = { pos, command->drawTriangles.uvs[i], command->drawTriangles.colours[i] };
+               batch->vertices[batch->vertex_i++] = v1;
+            }
+
+            cmd->vertex_count += command->drawTriangles.vert_count;
+         } break;
       }
    }
 }

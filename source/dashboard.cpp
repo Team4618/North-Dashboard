@@ -236,6 +236,11 @@ void DrawUI(element *root, DashboardState *state) {
       Rectangle(root, RectCenterSize(V2(40, 100), V2(5, 5)), BLACK);
       Rectangle(root, RectCenterSize(V2(500, 140), V2(5, 5)), BLACK);
       Rectangle(root, RectCenterSize(V2(650, 200), V2(5, 5)), BLACK);
+
+      v3 test_pos[] = { V3(40, 100, 0), V3(100, 100, 0), V3(100, 180, 0) };
+      v2 test_uvs[] = { V2(0, 0), V2(0, 0), V2(0, 0) };
+      v4 test_colours[] = { RED, BLUE, GREEN };
+      DrawTriangles(root, 3, test_pos, test_uvs, test_colours);
    }
 
    if(state->directory_changed) {

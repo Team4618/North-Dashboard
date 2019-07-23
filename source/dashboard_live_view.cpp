@@ -222,7 +222,7 @@ void DrawLiveDiagnostic(element *page, ui_field_topdown *field, ConnectedState *
 
 void DrawLiveRobotPose(element *page, ui_field_topdown *field, ConnectedState *state, ConnectedEntry *entry) {
    if(page) {
-      Label(page, entry->name, 20, BLACK);
+      Label(page, entry->name + " { pos = (" + ToString(entry->pose.pos.x) + ", " + ToString(entry->pose.pos.y) + ") angle = " + ToString(entry->pose.angle) + " }", 20, BLACK);
    }
 
    DrawRobot(field, V2(0.5, 0.5), entry->pose.pos, entry->pose.angle, BLACK);

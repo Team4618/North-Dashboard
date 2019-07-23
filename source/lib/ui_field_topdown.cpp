@@ -91,19 +91,74 @@ void DrawRobot(ui_field_topdown *field, v2 size,
 }
 
 //TODO: 3d field view --------------------------------------
-/*
-struct ui_field { 
-   element *e;
-   bool clicked;
-
+#if 1
+struct ui_field_persistent_data {
+   bool init;
    mat4 camera;
 };
 
-??
-void DrawTriangles(ui_field *field, v3 *vertices, v4 *colours, u32 triangle_count) {
+struct ui_field { 
+   element *e;
+   mat4 camera;
 
+   //TODO: redo the clicking system so it makes sense in 3d
+   // bool clicked;
+};
+
+ui_field _FieldTopdown(ui_id id, element *parent, v2 size, mat4 *camera) {
+   UIContext *context = parent->context;
+   InputState input = context->input_state;
+   
+   element *e = _Panel(id, parent, Size(size).Captures(INTERACTION_SELECT));
+
+   //Camera controls
+   if(IsSelected(e)) {
+      v3 vel = V3(0, 0, 0);
+      f32 speed = 1;
+
+      if(input.key_up_arrow) {
+         vel.y -= speed;
+      }
+
+      if(input.key_down_arrow) {
+         vel.y += speed;
+      }
+
+      if(input.key_left_arrow) {
+         vel.x -= speed;
+      }
+
+      if(input.key_right_arrow) {
+         vel.x += speed;
+      }
+
+      f32 dist = 10; //TODO: control this with scroll?
+      v3 pos = V3(0, 0, dist);
+      pos = pos + vel * context->dt;
+   }
+
+   ui_field result = {};
+   result.e = e;
+   result.camera = *camera;
+   return result;
+}
+
+ui_field _FieldTopdown(ui_id id, element *parent, v2 size, mat4 default_camera = Orthographic(10, -10, -10, 10, 0.1, 100)) {
+   ui_field_persistent_data *persistent_data = NULL; //GetOrAllocate(id, ui_field_persistent_data); 
+   if(!persistent_data->init) {
+      persistent_data->camera = default_camera;
+      persistent_data->init = true;
+   }
+
+   return _FieldTopdown(id, parent, size, &persistent_data->camera);
+}
+
+/*
+void DrawTriangles(ui_field *field, v3 *vertices, v4 *colours, u32 triangle_count) {
+   //transform vertices & add to render command buffer
 }
 
 //TODO: how do we implement the auto editor in 3d?
 
 */
+#endif

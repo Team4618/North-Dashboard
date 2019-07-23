@@ -39,7 +39,8 @@ glyph_texture *getOrLoadGlyph(loaded_font *font, u32 codepoint);
 enum RenderCommandType {
    RenderCommand_Texture,
    RenderCommand_Rectangle,
-   RenderCommand_Line
+   RenderCommand_Line,
+   RenderCommand_Triangles
 };
 
 struct RenderCommand {
@@ -70,6 +71,14 @@ struct RenderCommand {
 
          bool outline;
       } drawLine;
+
+      struct {
+         u32 vert_count;
+         v4 *colours;
+         v2 *uvs;
+         v3 *pos;
+         texture tex;
+      } drawTriangles;
    };
 };
 
@@ -523,6 +532,23 @@ void Text(element *e, string text, v2 pos, f32 line_height, v4 colour) {
 
 void Text(element *e, char *s, v2 pos, f32 height, v4 colour) {
    Text(e, Literal(s), pos, height, colour);
+}
+
+void DrawTriangles(element *e, u32 vert_count, v3 *pos, v2 *uvs, v4 *colours) {
+   UIContext *context = e->context;
+   MemoryArena *arena = context->frame_arena;
+
+   RenderCommand *result = PushStruct(arena, RenderCommand);
+   result->type = RenderCommand_Triangles;
+   result->next = NULL;
+   
+   result->drawTriangles.vert_count = vert_count;
+   result->drawTriangles.colours = PushArrayCopy(arena, v4, colours, vert_count);
+   result->drawTriangles.uvs = PushArrayCopy(arena, v2, uvs, vert_count);
+   result->drawTriangles.pos = PushArrayCopy(arena, v3, pos, vert_count);
+   // result->drawTriangles.tex = ?;
+
+   addCommand(e, result);
 }
 
 //---------------------------------------------------------------------
