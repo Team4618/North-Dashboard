@@ -241,60 +241,7 @@ f32 Angle(v2 v) {
 }
 //-------------------------------------------------------------
 
-f32 BuildPathMap(InterpolatingMap<AutoPathData> *len_to_data, North_HermiteControlPoint *points, u32 point_count) {
-   InterpolatingMapSamples<AutoPathData> samples = ResetMap(len_to_data);
-   f32 t_step = (f32)(point_count - 1) / (f32)(samples.count - 1);
-   
-   f32 length = 0;
-   v2 last_pos = points[0].pos;
-   for(u32 i = 0; i < samples.count; i++) {
-      f32 t_full = t_step * i;
-      u32 spline_i = Clamp(0, point_count - 2, (u32) t_full);
-      v2 pos = CubicHermiteSpline(points[spline_i], points[spline_i + 1], t_full - (f32)spline_i);
-
-      AutoPathData data = {};
-      data.pose.pos = pos;
-      data.pose.angle = ToRadians(Angle(CubicHermiteSplineTangent(points[spline_i], points[spline_i + 1], t_full - (f32)spline_i)));
-
-      length += Length(pos - last_pos);
-      last_pos = pos;
-      
-      samples.data[i].len = length;
-      samples.data[i].data = data;
-   }
-
-   f32 ds = length / (f32)(samples.count - 1);
-   for(u32 i = 0; i < samples.count; i++) {
-      AutoPathData *data = &samples.data[i].data;
-      AutoRobotPose curr_pose = data->pose;
-
-      f32 dtheta_ds = 0;
-      f32 d2theta_ds2 = 0;
-
-      if(i == 0) {
-         AutoRobotPose next_pose = samples.data[i + 1].data.pose;
-         dtheta_ds = ShortestAngleBetween_Radians(curr_pose.angle, next_pose.angle) / ds;
-      } else {
-         AutoRobotPose last_pose = samples.data[i - 1].data.pose;
-         dtheta_ds = ShortestAngleBetween_Radians(last_pose.angle, curr_pose.angle) / ds;
-      }
-
-      if((i != 0) && (i != samples.count - 1)) {
-         AutoRobotPose next_pose = samples.data[i + 1].data.pose;
-         AutoRobotPose last_pose = samples.data[i - 1].data.pose;
-
-         d2theta_ds2 = (ShortestAngleBetween_Radians(curr_pose.angle, next_pose.angle) / ds - ShortestAngleBetween_Radians(last_pose.angle, curr_pose.angle) / ds) / ds;
-      }
-      
-      data->dtheta_ds = dtheta_ds;
-      data->d2theta_ds2 = d2theta_ds2;
-   }
-
-   BuildMap(len_to_data);
-   return length;
-}
-
-struct AutoPath {   
+struct AutoPath {
    AutoNode *in_node;
    v2 in_tangent;
    AutoNode *out_node;
@@ -311,15 +258,70 @@ struct AutoPath {
    u32 control_point_count;
    North_HermiteControlPoint *control_points;
 
+   MemoryArena *len_map_arena;
    InterpolatingMap<AutoPathData> len_to_data;
    f32 length;
 };
 
 void InitAutoPath(AutoPath *path) {
    //TODO: properly do this, BIG HACK
-   path->len_to_data.arena = PlatformAllocArena(Megabyte(2), "AutoPathHACK");
-   path->len_to_data.sample_exp = 7;
-   path->len_to_data.lerp_callback = path_data_lerp;
+   path->len_map_arena = PlatformAllocArena(Megabyte(2), "AutoPathHACK");
+}
+
+f32 BuildPathMap(AutoPath *path, North_HermiteControlPoint *points, u32 point_count) {
+   u32 sample_count = (1 << 7);
+   InterpolatingMapSample<AutoPathData> *samples = PushTempArray(InterpolatingMapSample<AutoPathData>, sample_count);
+   f32 t_step = (f32)(point_count - 1) / (f32)(sample_count - 1);
+   
+   f32 length = 0;
+   v2 last_pos = points[0].pos;
+   for(u32 i = 0; i < sample_count; i++) {
+      f32 t_full = t_step * i;
+      u32 spline_i = Clamp(0, point_count - 2, (u32) t_full);
+      v2 pos = CubicHermiteSpline(points[spline_i], points[spline_i + 1], t_full - (f32)spline_i);
+
+      AutoPathData data = {};
+      data.pose.pos = pos;
+      data.pose.angle = ToRadians(Angle(CubicHermiteSplineTangent(points[spline_i], points[spline_i + 1], t_full - (f32)spline_i)));
+
+      length += Length(pos - last_pos);
+      last_pos = pos;
+      
+      samples[i].key = length;
+      samples[i].data = data;
+   }
+
+   f32 ds = length / (f32)(sample_count - 1);
+   for(u32 i = 0; i < sample_count; i++) {
+      AutoPathData *data = &samples[i].data;
+      AutoRobotPose curr_pose = data->pose;
+
+      f32 dtheta_ds = 0;
+      f32 d2theta_ds2 = 0;
+
+      if(i == 0) {
+         AutoRobotPose next_pose = samples[i + 1].data.pose;
+         dtheta_ds = ShortestAngleBetween_Radians(curr_pose.angle, next_pose.angle) / ds;
+      } else {
+         AutoRobotPose last_pose = samples[i - 1].data.pose;
+         dtheta_ds = ShortestAngleBetween_Radians(last_pose.angle, curr_pose.angle) / ds;
+      }
+
+      if((i != 0) && (i != sample_count - 1)) {
+         AutoRobotPose next_pose = samples[i + 1].data.pose;
+         AutoRobotPose last_pose = samples[i - 1].data.pose;
+
+         d2theta_ds2 = (ShortestAngleBetween_Radians(curr_pose.angle, next_pose.angle) / ds - ShortestAngleBetween_Radians(last_pose.angle, curr_pose.angle) / ds) / ds;
+      }
+      
+      data->dtheta_ds = dtheta_ds;
+      data->d2theta_ds2 = d2theta_ds2;
+   }
+
+   //NOTE: this copies the array, thats why we allocate it in temp here. We could directly allocate & skip the copy though
+   Reset(path->len_map_arena);
+   path->len_to_data = BuildInterpolatingMap(samples, sample_count, path->len_map_arena, path_data_lerp);
+   return length;
 }
 
 struct AutoProjectLink {
@@ -362,7 +364,7 @@ f32 GetVelocityAt(AutoPath *path, f32 distance) {
 
 void RecalculateAutoPathLength(AutoPath *path) {
    AutoPathSpline spline = GetAutoPathSpline(path);
-   path->length = BuildPathMap(&path->len_to_data, spline.points, spline.point_count);
+   path->length = BuildPathMap(path, spline.points, spline.point_count);
 }
 
 void RecalculatePathlikeData(AutoPathlikeData *pathlike, f32 length) {

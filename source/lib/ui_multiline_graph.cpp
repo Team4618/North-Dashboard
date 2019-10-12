@@ -472,7 +472,7 @@ u32 GetOrCreateUnit(MultiLineGraphData *data, string suffix) {
    u32 unit_id = 0;
    for(u32 i = 0; i < data->unit_count; i++) {
       if(data->units[i].suffix == suffix) {
-         unit_id = i;
+         unit_id = i + 1;
          break;
       }
    }
@@ -515,7 +515,7 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, string
 
       graph->name = PushCopy(data->arena, name);
       graph->hidden = false;
-      graph->colour = V4(Random01(), Random01(), Random01(), 1);
+      graph->colour = BLACK; //V4(Random01(), Random01(), Random01(), 1);
       graph->unit_id = GetOrCreateUnit(data, unit);
 
       graph->sentinel.next = &graph->sentinel;
@@ -629,7 +629,7 @@ void AddEntry(MultiLineGraphData *data, string name, f32 value, f32 time, string
          graph->min_value = Min(graph->min_value, value);
          graph->max_value = Max(graph->max_value, value);
       } else {
-         UnitSettings *unit = data->units + graph->unit_id;
+         UnitSettings *unit = data->units + (graph->unit_id - 1);
          unit->min_value = Min(unit->min_value, value);
          unit->max_value = Max(unit->max_value, value);
       }

@@ -11,8 +11,9 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "lib/stb_truetype.h"
 
-#define COMMON_PLATFORM
-#include "lib/common.cpp"
+#include "common/common.h"
+#include "interpolating_map.h"
+
 #include "lib/ui_core.cpp"
 #include "lib/ui_button.cpp"
 #include "lib/ui_textbox.cpp"

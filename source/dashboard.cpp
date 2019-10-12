@@ -130,6 +130,8 @@ void DrawAutoPath(DashboardState *state, ui_field_topdown *field, AutoPath *path
    DrawAutoNode(state, field, path->out_node, preview);
 }
 
+#include "test_sim.cpp"
+
 void DrawHome(element *full_page, DashboardState *state) {
    StackLayout(full_page);
    element *page = VerticalList(full_page);
@@ -143,6 +145,107 @@ void DrawHome(element *full_page, DashboardState *state) {
       
       ui_field_topdown field = FieldTopdown(page, state->settings.field.image, state->settings.field.size,
                                             Clamp(0, Size(page->bounds).x, 700));
+
+#if 1
+      //draw test robot
+      static AutoRobotPose test_pose = {};
+      DrawRobot(&field, V2(1, 1), test_pose.pos, test_pose.angle, BLACK);
+      
+      static f32 test_pr = 0;
+      static f32 test_pl = 0; 
+      Label(page, "Right", 40, BLACK);
+      HorizontalSlider(page, &test_pr, -2, 2, V2(200, 40));
+      Label(page, "Left", 40, BLACK);
+      HorizontalSlider(page, &test_pl, -2, 2, V2(200, 40));
+      if(Button(page, "Move", menu_button).clicked) {
+         test_pose = ForwardKinematics(test_pose, test_pr, test_pl, 1);
+      }
+
+      u32 shadow_count = 10;
+      f32 shadow_step = 1.0 / (shadow_count - 1);
+      for(u32 i = 0; i < shadow_count; i++) {
+         AutoRobotPose shadow_pose = ForwardKinematics(test_pose, shadow_step * i * test_pr, shadow_step * i * test_pl, 1);
+         DrawRobot(&field, V2(1, 1), shadow_pose.pos, shadow_pose.angle, BLACK);
+      }
+#endif
+
+#if 0
+      static North_HermiteControlPoint test_spline[] = {
+         {V2(0, 0), V2(8, 0)},
+         {V2(3, 2), V2(8, 0)}
+      }; 
+
+      SplineResult test_spline_gen = SplineToWheelSetpoints(test_spline, ArraySize(test_spline), 20, 20);
+
+      for(u32 i = 0; i < test_spline_gen.arclength_pose_map.sample_count; i++) {
+         AutoRobotPose shadow_pose = test_spline_gen.arclength_pose_map.samples[i].data;
+         DrawRobot(&field, V2(1, 1), shadow_pose.pos, shadow_pose.angle, BLACK);
+      }
+
+      CubicHermiteSpline(&field, test_spline[0].pos, test_spline[0].tangent, test_spline[1].pos, test_spline[1].tangent, BLACK);
+
+      static AutoRobotPose test_pose = {};
+      DrawRobot(&field, V2(1, 1), test_pose.pos, test_pose.angle, RED);
+
+      static u32 wheel_setpoint_i = 1;
+      if(Button(page, "Move", menu_button).clicked) {
+         if(wheel_setpoint_i < test_spline_gen.wheel_setpoint_map.sample_count) {
+            v2 delta_p = test_spline_gen.wheel_setpoint_map.samples[wheel_setpoint_i].data - test_spline_gen.wheel_setpoint_map.samples[wheel_setpoint_i - 1].data;
+            test_pose = ForwardKinematics(test_pose, delta_p.x, delta_p.y, 1);  
+            wheel_setpoint_i++;
+         }
+      }
+#endif
+
+#if 0
+      static MultiLineGraphData spline_test_graph = NewMultiLineGraph(PlatformAllocArena(Megabyte(1), "Test Spline"));
+      ResetMultiLineGraph(&spline_test_graph);
+
+      SplineResult spline_gen2 = SplineToWheelSetpoints(test_spline, ArraySize(test_spline), 20, 2);
+      SplineResult spline_gen10 = SplineToWheelSetpoints(test_spline, ArraySize(test_spline), 20, 10);
+      SplineResult spline_gen20 = SplineToWheelSetpoints(test_spline, ArraySize(test_spline), 20, 20);
+
+      static f32 setpoint_n = 20;
+      HorizontalSlider(page, &setpoint_n, 1, 40, V2(200, 40));
+      Label(page, ToString((u32)setpoint_n), 40, BLACK);
+      
+      SplineResult spline_gen_n = SplineToWheelSetpoints(test_spline, ArraySize(test_spline), 20, (u32)setpoint_n);
+
+      for(u32 i = 0; i < spline_gen2.wheel_setpoint_map.sample_count; i++) {
+         AddEntry(&spline_test_graph, "2x", spline_gen2.wheel_setpoint_map.samples[i].data.x, spline_gen2.wheel_setpoint_map.samples[i].key, "m");
+         // AddEntry(&spline_test_graph, "2y", spline_gen2.wheel_setpoint_map.samples[i].data.y, spline_gen2.wheel_setpoint_map.samples[i].key, "m");
+      }
+
+      for(u32 i = 0; i < spline_gen10.wheel_setpoint_map.sample_count; i++) {
+         AddEntry(&spline_test_graph, "10x", spline_gen10.wheel_setpoint_map.samples[i].data.x, spline_gen10.wheel_setpoint_map.samples[i].key, "m");
+         // AddEntry(&spline_test_graph, "10y", spline_gen10.wheel_setpoint_map.samples[i].data.y, spline_gen10.wheel_setpoint_map.samples[i].key, "m");
+      }
+
+      for(u32 i = 0; i < spline_gen20.wheel_setpoint_map.sample_count; i++) {
+         AddEntry(&spline_test_graph, "20x", spline_gen20.wheel_setpoint_map.samples[i].data.x, spline_gen20.wheel_setpoint_map.samples[i].key, "m");
+         // AddEntry(&spline_test_graph, "20y", spline_gen20.wheel_setpoint_map.samples[i].data.y, spline_gen20.wheel_setpoint_map.samples[i].key, "m");
+      }
+
+      for(u32 i = 0; i < spline_gen_n.wheel_setpoint_map.sample_count; i++) {
+         AddEntry(&spline_test_graph, "Nx", spline_gen_n.wheel_setpoint_map.samples[i].data.x, spline_gen_n.wheel_setpoint_map.samples[i].key, "m");
+         // AddEntry(&spline_test_graph, "Ny", spline_gen_n.wheel_setpoint_map.samples[i].data.y, spline_gen_n.wheel_setpoint_map.samples[i].key, "m");
+      }
+
+      MultiLineGraph(page, &spline_test_graph, V2(Size(page).x - 40, 400));
+#endif
+
+#if 0
+      //TODO: robot kinematics simulator (simulate acceleration profiles, see what constant accel looks like)
+      v2 wheel_ps[] = {};
+
+      
+
+      AutoRobotPose sim_test_poses[] = {};
+      for(u32 i = 1; i < ArraySize(wheel_ps); i++) {
+         v2 wheel_diff = wheel_ps[i] - wheel_ps[i - 1];
+         sim_test_poses[i] = ForwardKinematics(sim_test_poses[i - 1], wheel_diff.x, wheel_diff.y, 1);
+      }
+#endif
 
       // v2 robot_size_px =  FeetToPixels(&field, profile->size);
       // for(u32 i = 0; i < state->settings.field.starting_position_count; i++) {
@@ -224,6 +327,8 @@ void _PageButton(ui_id id, element *parent, char *name, DashboardPage page, Dash
       state->page = page;
    }
 }
+
+#include "gradient_descent.cpp"
 
 void DrawUI(element *root, DashboardState *state) {
    //OutputDebugStringA(ToCString(Concat(Literal("fps "), ToString(root->context->fps), Literal("\n"))));

@@ -31,7 +31,7 @@ void CreateSocket() {
 u32 sent_packet_count = 0;
 u32 recv_data_size = 0;
 
-bool HandleConnectionStatus(char *connection_target, f32 curr_time) {
+bool HandleConnectionStatus(const char *connection_target, f32 curr_time) {
    if(recv(tcp_socket, NULL, 0, 0) == SOCKET_ERROR) {
       s32 wsa_error = WSAGetLastError();
       if(wsa_error == WSAENOTCONN) {
@@ -64,9 +64,10 @@ bool HandleConnectionStatus(char *connection_target, f32 curr_time) {
    if(!tcp_connected) {
       struct sockaddr_in server_addr = {};
       server_addr.sin_family = AF_INET;
-      server_addr.sin_addr.s_addr = inet_addr(connection_target); 
       server_addr.sin_port = htons(5800);
-
+      InetPton(AF_INET, "192.168.1.1", &server_addr.sin_addr.s_addr);
+      // server_addr.sin_addr.s_addr = inet_addr(connection_target); 
+      
       if(connect(tcp_socket, (SOCKADDR *) &server_addr, sizeof(server_addr)) != 0) {
          // OutputDebugStringA(ToCString(Concat( ToString(WSAGetLastError()), Literal("\n") )));
       }

@@ -676,7 +676,7 @@ void DrawSelectedPath(EditorState *state, ui_field_topdown *field, bool field_cl
       }
 
       v2 drag_vector = GetDrag(handle);
-      point->pos = ClampTo(point->pos + PixelsToFeet(field, drag_vector),
+      point->pos = ClampTo(point->pos + PixelsToFeet(field, V2(drag_vector.x, -drag_vector.y)),
                            RectCenterSize(V2(0, 0), field->size_in_ft));
 
       if(Length(drag_vector) > 0)
@@ -810,5 +810,9 @@ void DrawEditingView(element *page, EditorState *state) {
       Reset(state->project_arena);
       state->project = NULL;
       state->view = EditorView_Blank;
+
+      state->selected_type = NothingSelected;
+      state->selected_node = NULL;
+      state->selected_path = NULL;
    }
 }
